@@ -1,0 +1,35 @@
+# 开发环境专用依赖
+-r requirements.txt
+
+# 代码格式化和检查
+black>=23.0.0
+isort>=5.12.0
+flake8>=6.0.0
+mypy>=1.0.0
+pre-commit>=3.0.0
+
+# 测试相关
+pytest>=7.0.0
+pytest-cov>=4.0.0
+pytest-mock>=3.10.0
+pytest-xdist>=3.0.0
+coverage>=7.0.0
+
+# 文档生成
+sphinx>=6.0.0
+sphinx-rtd-theme>=1.2.0
+
+# 性能分析
+memory-profiler>=0.60.0
+line-profiler>=4.0.0
+
+# Jupyter开发环境
+jupyter>=1.0.0
+jupyterlab>=4.0.0
+ipython>=8.0.0
+matplotlib>=3.6.0
+seaborn>=0.12.0
+
+# 代码安全检查
+bandit>=1.7.0
+safety>=2.3.0
