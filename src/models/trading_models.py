@@ -186,7 +186,11 @@ class Position:
     quantity: int
     entry_price: float
     entry_time: datetime
-    strategy: TradingStrategy
+    strategy: TradingStrategy = None  # 允许为None以兼容风险管理器
+    
+    # 新增字段支持风险管理
+    position_id: str = ""
+    position_type: str = "LONG"  # "LONG" or "SHORT"
     
     # 风险管理
     stop_loss_price: Optional[float] = None
@@ -194,7 +198,29 @@ class Position:
     
     # 当前状态
     current_price: float = 0.0
+    current_value: float = 0.0
     unrealized_pnl: float = 0.0
+    
+    # Greeks (for options)
+    delta: Optional[float] = None
+    gamma: Optional[float] = None
+    theta: Optional[float] = None
+    vega: Optional[float] = None
+    
+    # 市场数据
+    bid_ask_spread: Optional[float] = None
+    underlying: Optional[str] = None
+    
+    def __post_init__(self):
+        """初始化后处理"""
+        if not self.position_id:
+            # 自动生成ID
+            import uuid
+            self.position_id = f"POS_{uuid.uuid4().hex[:8].upper()}"
+        
+        if self.current_value == 0.0:
+            # 自动计算价值
+            self.current_value = abs(self.quantity) * self.current_price
     
     def update_current_price(self, price: float):
         """更新当前价格和未实现盈亏"""
