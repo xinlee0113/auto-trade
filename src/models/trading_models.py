@@ -45,6 +45,96 @@ class MarketData:
 
 
 @dataclass
+class UnderlyingTickData:
+    """标的资产Tick数据模型"""
+    symbol: str
+    timestamp: datetime
+    price: float
+    volume: int
+    bid: float
+    ask: float
+    bid_size: int = 0
+    ask_size: int = 0
+    
+    @property
+    def spread(self) -> float:
+        """买卖价差"""
+        return self.ask - self.bid
+
+
+@dataclass
+class OptionTickData:
+    """期权Tick数据模型"""
+    symbol: str
+    underlying: str
+    strike: float
+    expiry: str
+    right: str  # 'CALL' or 'PUT'
+    timestamp: datetime
+    price: float
+    volume: int
+    bid: float
+    ask: float
+    bid_size: int = 0
+    ask_size: int = 0
+    open_interest: int = 0
+    
+    # 期权Greeks (可选，计算得出)
+    delta: Optional[float] = None
+    gamma: Optional[float] = None
+    theta: Optional[float] = None
+    vega: Optional[float] = None
+    implied_volatility: Optional[float] = None
+    
+    @property
+    def spread(self) -> float:
+        """买卖价差"""
+        return self.ask - self.bid
+    
+    @property
+    def spread_percentage(self) -> float:
+        """买卖价差百分比"""
+        return (self.spread / self.price * 100) if self.price > 0 else 0.0
+    
+    @property
+    def is_call(self) -> bool:
+        """是否为看涨期权"""
+        return self.right.upper() == 'CALL'
+    
+    @property
+    def is_put(self) -> bool:
+        """是否为看跌期权"""
+        return self.right.upper() == 'PUT'
+
+
+@dataclass
+class TradeExecution:
+    """交易执行结果"""
+    order_id: str
+    symbol: str
+    side: str  # 'BUY' or 'SELL'
+    quantity: int
+    executed_price: float
+    executed_time: datetime
+    execution_status: str  # 'FILLED', 'PARTIAL', 'REJECTED'
+    commission: float = 0.0
+    error_message: Optional[str] = None
+
+
+@dataclass
+class PnLMetrics:
+    """盈亏指标"""
+    realized_pnl: float
+    unrealized_pnl: float
+    total_pnl: float
+    daily_pnl: float
+    max_drawdown: float
+    win_rate: float
+    profit_factor: float
+    sharpe_ratio: Optional[float] = None
+
+
+@dataclass
 class MarketAnalysis:
     """市场分析结果"""
     symbol: str
