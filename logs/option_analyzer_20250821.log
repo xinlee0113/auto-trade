@@ -1,0 +1,90 @@
+2025-08-21 18:08:06 - option_analyzer - INFO - analyze_options:56 - 开始期权分析，策略: liquidity, 当前价格: $565.90
+2025-08-21 18:08:06 - option_analyzer - INFO - _preprocess_data:123 - 价格区间筛选: $554.58 - $577.22, 筛选后: 46 个期权
+2025-08-21 18:08:06 - option_analyzer - INFO - analyze_options:86 - 分析完成: 3 Call, 3 Put
+2025-08-21 18:08:07 - option_analyzer - INFO - analyze_options:56 - 开始期权分析，策略: balanced, 当前价格: $565.90
+2025-08-21 18:08:07 - option_analyzer - INFO - _preprocess_data:123 - 价格区间筛选: $554.58 - $577.22, 筛选后: 46 个期权
+2025-08-21 18:08:07 - option_analyzer - INFO - analyze_options:86 - 分析完成: 3 Call, 3 Put
+2025-08-21 18:08:08 - option_analyzer - INFO - analyze_options:56 - 开始期权分析，策略: value, 当前价格: $565.90
+2025-08-21 18:08:08 - option_analyzer - INFO - _preprocess_data:123 - 价格区间筛选: $554.58 - $577.22, 筛选后: 46 个期权
+2025-08-21 18:08:08 - option_analyzer - INFO - analyze_options:86 - 分析完成: 3 Call, 3 Put
+2025-08-21 18:08:22 - option_analyzer - INFO - analyze_options:56 - 开始期权分析，策略: balanced, 当前价格: $565.90
+2025-08-21 18:08:22 - option_analyzer - INFO - _preprocess_data:123 - 价格区间筛选: $554.58 - $577.22, 筛选后: 46 个期权
+2025-08-21 18:08:22 - option_analyzer - INFO - analyze_options:86 - 分析完成: 2 Call, 2 Put
+2025-08-21 18:08:42 - option_analyzer - INFO - analyze_options:56 - 开始期权分析，策略: liquidity, 当前价格: $565.90
+2025-08-21 18:08:42 - option_analyzer - INFO - _preprocess_data:123 - 价格区间筛选: $554.58 - $577.22, 筛选后: 46 个期权
+2025-08-21 18:08:42 - option_analyzer - INFO - analyze_options:86 - 分析完成: 3 Call, 3 Put
+2025-08-21 18:08:44 - option_analyzer - INFO - analyze_options:56 - 开始期权分析，策略: balanced, 当前价格: $565.90
+2025-08-21 18:08:44 - option_analyzer - INFO - _preprocess_data:123 - 价格区间筛选: $554.58 - $577.22, 筛选后: 46 个期权
+2025-08-21 18:08:44 - option_analyzer - INFO - analyze_options:86 - 分析完成: 3 Call, 3 Put
+2025-08-21 18:08:45 - option_analyzer - INFO - analyze_options:56 - 开始期权分析，策略: value, 当前价格: $565.90
+2025-08-21 18:08:45 - option_analyzer - INFO - _preprocess_data:123 - 价格区间筛选: $554.58 - $577.22, 筛选后: 46 个期权
+2025-08-21 18:08:45 - option_analyzer - INFO - analyze_options:86 - 分析完成: 3 Call, 3 Put
+2025-08-21 18:09:07 - option_analyzer - INFO - analyze_options:56 - 开始期权分析，策略: balanced, 当前价格: $565.50
+2025-08-21 18:09:07 - option_analyzer - ERROR - analyze_options:99 - 期权分析失败: 期权链数据验证失败
+Traceback (most recent call last):
+  File "E:\01_lixin_work_space\01_code\auto_trade\test\api\..\..\src\services\option_analyzer.py", line 60, in analyze_options
+    raise DataValidationException("期权链数据验证失败")
+src.utils.exception_handler.DataValidationException: 期权链数据验证失败
+2025-08-21 18:09:07 - option_analyzer - INFO - analyze_options:56 - 开始期权分析，策略: balanced, 当前价格: $565.50
+2025-08-21 18:09:07 - option_analyzer - ERROR - analyze_options:99 - 期权分析失败: 期权链数据验证失败
+Traceback (most recent call last):
+  File "E:\01_lixin_work_space\01_code\auto_trade\test\api\..\..\src\services\option_analyzer.py", line 60, in analyze_options
+    raise DataValidationException("期权链数据验证失败")
+src.utils.exception_handler.DataValidationException: 期权链数据验证失败
+2025-08-21 18:09:22 - option_analyzer - INFO - analyze_options:56 - 开始期权分析，策略: balanced, 当前价格: $565.50
+2025-08-21 18:09:22 - option_analyzer - ERROR - analyze_options:99 - 期权分析失败: 期权链数据验证失败
+Traceback (most recent call last):
+  File "E:\01_lixin_work_space\01_code\auto_trade\test\api\..\..\src\services\option_analyzer.py", line 60, in analyze_options
+    raise DataValidationException("期权链数据验证失败")
+src.utils.exception_handler.DataValidationException: 期权链数据验证失败
+2025-08-21 18:09:22 - option_analyzer - INFO - analyze_options:56 - 开始期权分析，策略: balanced, 当前价格: $565.50
+2025-08-21 18:09:22 - option_analyzer - ERROR - analyze_options:99 - 期权分析失败: 期权链数据验证失败
+Traceback (most recent call last):
+  File "E:\01_lixin_work_space\01_code\auto_trade\test\api\..\..\src\services\option_analyzer.py", line 60, in analyze_options
+    raise DataValidationException("期权链数据验证失败")
+src.utils.exception_handler.DataValidationException: 期权链数据验证失败
+2025-08-21 18:10:50 - option_analyzer - INFO - analyze_options:56 - 开始期权分析，策略: balanced, 当前价格: $565.00
+2025-08-21 18:10:50 - option_analyzer - ERROR - analyze_options:99 - 期权分析失败: 期权链数据验证失败
+Traceback (most recent call last):
+  File "E:\01_lixin_work_space\01_code\auto_trade\test\api\..\..\src\services\option_analyzer.py", line 60, in analyze_options
+    raise DataValidationException("期权链数据验证失败")
+src.utils.exception_handler.DataValidationException: 期权链数据验证失败
+2025-08-21 18:10:50 - option_analyzer - INFO - analyze_options:56 - 开始期权分析，策略: balanced, 当前价格: $565.00
+2025-08-21 18:10:50 - option_analyzer - INFO - _preprocess_data:123 - 价格区间筛选: $553.70 - $576.30, 筛选后: 3 个期权
+2025-08-21 18:10:50 - option_analyzer - INFO - analyze_options:86 - 分析完成: 2 Call, 1 Put
+2025-08-21 18:10:50 - option_analyzer - INFO - analyze_options:56 - 开始期权分析，策略: balanced, 当前价格: $565.00
+2025-08-21 18:10:50 - option_analyzer - INFO - _preprocess_data:123 - 价格区间筛选: $553.70 - $576.30, 筛选后: 2 个期权
+2025-08-21 18:10:50 - option_analyzer - INFO - analyze_options:86 - 分析完成: 1 Call, 1 Put
+2025-08-21 18:11:27 - option_analyzer - INFO - analyze_options:56 - 开始期权分析，策略: balanced, 当前价格: $565.00
+2025-08-21 18:11:27 - option_analyzer - ERROR - analyze_options:99 - 期权分析失败: 期权链数据验证失败
+Traceback (most recent call last):
+  File "E:\01_lixin_work_space\01_code\auto_trade\test\api\..\..\src\services\option_analyzer.py", line 60, in analyze_options
+    raise DataValidationException("期权链数据验证失败")
+src.utils.exception_handler.DataValidationException: 期权链数据验证失败
+2025-08-21 18:11:27 - option_analyzer - INFO - analyze_options:56 - 开始期权分析，策略: balanced, 当前价格: $565.00
+2025-08-21 18:11:27 - option_analyzer - INFO - _preprocess_data:123 - 价格区间筛选: $553.70 - $576.30, 筛选后: 3 个期权
+2025-08-21 18:11:27 - option_analyzer - INFO - analyze_options:86 - 分析完成: 2 Call, 1 Put
+2025-08-21 18:11:28 - option_analyzer - INFO - analyze_options:56 - 开始期权分析，策略: balanced, 当前价格: $565.00
+2025-08-21 18:11:28 - option_analyzer - INFO - _preprocess_data:123 - 价格区间筛选: $553.70 - $576.30, 筛选后: 2 个期权
+2025-08-21 18:11:28 - option_analyzer - INFO - analyze_options:86 - 分析完成: 1 Call, 1 Put
+2025-08-21 18:12:23 - option_analyzer - INFO - analyze_options:56 - 开始期权分析，策略: balanced, 当前价格: $565.00
+2025-08-21 18:12:23 - option_analyzer - ERROR - analyze_options:99 - 期权分析失败: 期权链数据验证失败
+Traceback (most recent call last):
+  File "E:\01_lixin_work_space\01_code\auto_trade\test\api\..\..\src\services\option_analyzer.py", line 60, in analyze_options
+    raise DataValidationException("期权链数据验证失败")
+src.utils.exception_handler.DataValidationException: 期权链数据验证失败
+2025-08-21 18:12:23 - option_analyzer - INFO - analyze_options:56 - 开始期权分析，策略: balanced, 当前价格: $565.00
+2025-08-21 18:12:23 - option_analyzer - INFO - _preprocess_data:123 - 价格区间筛选: $553.70 - $576.30, 筛选后: 3 个期权
+2025-08-21 18:12:23 - option_analyzer - INFO - analyze_options:86 - 分析完成: 2 Call, 1 Put
+2025-08-21 18:12:23 - option_analyzer - INFO - analyze_options:56 - 开始期权分析，策略: balanced, 当前价格: $565.00
+2025-08-21 18:12:23 - option_analyzer - INFO - _preprocess_data:123 - 价格区间筛选: $553.70 - $576.30, 筛选后: 2 个期权
+2025-08-21 18:12:23 - option_analyzer - INFO - analyze_options:86 - 分析完成: 1 Call, 1 Put
+2025-08-21 18:12:47 - option_analyzer - INFO - analyze_options:56 - 开始期权分析，策略: liquidity, 当前价格: $565.90
+2025-08-21 18:12:47 - option_analyzer - INFO - _preprocess_data:123 - 价格区间筛选: $554.58 - $577.22, 筛选后: 46 个期权
+2025-08-21 18:12:47 - option_analyzer - INFO - analyze_options:86 - 分析完成: 3 Call, 3 Put
+2025-08-21 18:12:48 - option_analyzer - INFO - analyze_options:56 - 开始期权分析，策略: balanced, 当前价格: $565.90
+2025-08-21 18:12:48 - option_analyzer - INFO - _preprocess_data:123 - 价格区间筛选: $554.58 - $577.22, 筛选后: 46 个期权
+2025-08-21 18:12:48 - option_analyzer - INFO - analyze_options:86 - 分析完成: 3 Call, 3 Put
+2025-08-21 18:12:49 - option_analyzer - INFO - analyze_options:56 - 开始期权分析，策略: value, 当前价格: $565.90
+2025-08-21 18:12:49 - option_analyzer - INFO - _preprocess_data:123 - 价格区间筛选: $554.58 - $577.22, 筛选后: 46 个期权
+2025-08-21 18:12:49 - option_analyzer - INFO - analyze_options:86 - 分析完成: 3 Call, 3 Put

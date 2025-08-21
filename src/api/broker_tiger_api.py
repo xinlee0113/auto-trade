@@ -1,5 +1,10 @@
+import time
+from typing import Callable, List, Optional
 from tigeropen.common.util.order_utils import order_leg
 from tigeropen.push.push_client import PushClient
+from tigeropen.push.pb.QuoteDepthData_pb2 import QuoteDepthData
+from tigeropen.push.pb.QuoteBasicData_pb2 import QuoteBasicData
+from tigeropen.push.pb.QuoteBBOData_pb2 import QuoteBBOData
 from tigeropen.quote.quote_client import QuoteClient
 from tigeropen.tiger_open_config import TigerOpenClientConfig
 from tigeropen.trade.trade_client import TradeClient
@@ -17,9 +22,6 @@ class BrokerTigerAPI:
             if not os.path.exists(config_path):
                 raise FileNotFoundError(f"配置文件不存在: {config_path}")
 
-            if not os.path.exists(private_key_path):
-                raise FileNotFoundError(f"私钥文件不存在: {private_key_path}")
-
             # 导入必要的工具函数
             from tigeropen.common.util.signature_utils import read_private_key
             from tigeropen.common.consts import Language
@@ -29,14 +31,48 @@ class BrokerTigerAPI:
                 sandbox_debug=False,  # 生产环境
                 props_path=config_path
             )
-            client_config.private_key = read_private_key(private_key_path)
+            
+            # 尝试从private_key.pem文件读取私钥，如果文件不存在则从配置文件读取
+            if os.path.exists(private_key_path):
+                client_config.private_key = read_private_key(private_key_path)
+                print("✅ 从private_key.pem文件读取私钥")
+            else:
+                # 从配置文件读取私钥
+                import configparser
+                config = configparser.ConfigParser()
+                config.read(config_path)
+                
+                # 尝试读取pk8格式的私钥
+                if config.has_option('DEFAULT', 'private_key_pk8'):
+                    private_key_content = config.get('DEFAULT', 'private_key_pk8')
+                    client_config.private_key = private_key_content
+                    print("✅ 从配置文件读取pk8格式私钥")
+                elif config.has_option('DEFAULT', 'private_key_pk1'):
+                    private_key_content = config.get('DEFAULT', 'private_key_pk1')
+                    client_config.private_key = private_key_content
+                    print("✅ 从配置文件读取pk1格式私钥")
+                else:
+                    raise ValueError("配置文件中未找到私钥信息（private_key_pk8 或 private_key_pk1）")
             client_config.language = Language.zh_CN
             client_config.timeout = 60
+
+            # 保存配置供后续使用
+            self.client_config = client_config
 
             # 创建客户端实例
             self.trade_client = TradeClient(client_config)
             protocol, host, port = client_config.socket_host_port
             self.push_client = PushClient(host, port, use_ssl=(protocol == 'ssl'))
+            
+            # 初始化推送相关变量
+            self.is_push_connected = False
+            self.depth_quote_listeners = []
+            self.quote_listeners = []
+            self.bbo_listeners = []
+            
+            # 设置推送客户端回调
+            self._setup_push_callbacks()
+            
             print("✅ 客户端初始化完成")
 
             self.quote_client = QuoteClient(client_config)
@@ -150,3 +186,315 @@ class BrokerTigerAPI:
         # 查询主订单所关联的附加订单
         order_legs = self.trade_client.get_open_orders(account, parent_id=main_order.order_id)
         print(order_legs)
+
+    def _setup_push_callbacks(self):
+        """设置推送客户端的回调方法"""
+        # 深度行情回调
+        self.push_client.quote_depth_changed = self._on_quote_depth_changed
+        # 基本行情回调
+        self.push_client.quote_changed = self._on_quote_changed
+        # 最优报价回调
+        self.push_client.quote_bbo_changed = self._on_quote_bbo_changed
+        
+        # 连接相关回调
+        self.push_client.connect_callback = self._on_connect
+        self.push_client.disconnect_callback = self._on_disconnect
+        self.push_client.error_callback = self._on_error
+        
+        # 订阅相关回调
+        self.push_client.subscribe_callback = self._on_subscribe
+        self.push_client.unsubscribe_callback = self._on_unsubscribe
+        self.push_client.query_subscribed_callback = self._on_query_subscribed
+    
+    def _on_quote_depth_changed(self, frame: QuoteDepthData):
+        """深度行情变化回调分发"""
+        try:
+            # 分发给所有注册的监听器
+            for listener in self.depth_quote_listeners:
+                try:
+                    listener(frame)
+                except Exception as e:
+                    print(f"❌ 深度行情监听器执行失败: {e}")
+        except Exception as e:
+            print(f"❌ 深度行情回调分发失败: {e}")
+    
+    def _on_quote_changed(self, frame: QuoteBasicData):
+        """基本行情变化回调分发"""
+        try:
+            for listener in self.quote_listeners:
+                try:
+                    listener(frame)
+                except Exception as e:
+                    print(f"❌ 基本行情监听器执行失败: {e}")
+        except Exception as e:
+            print(f"❌ 基本行情回调分发失败: {e}")
+    
+    def _on_quote_bbo_changed(self, frame: QuoteBBOData):
+        """最优报价变化回调分发"""
+        try:
+            for listener in self.bbo_listeners:
+                try:
+                    listener(frame)
+                except Exception as e:
+                    print(f"❌ 最优报价监听器执行失败: {e}")
+        except Exception as e:
+            print(f"❌ 最优报价回调分发失败: {e}")
+    
+    def _on_connect(self, frame):
+        """连接建立回调"""
+        self.is_push_connected = True
+        print(f"✅ 推送连接已建立: {frame}")
+    
+    def _on_disconnect(self):
+        """连接断开回调，实现自动重连"""
+        self.is_push_connected = False
+        print("⚠️ 推送连接断开，开始重连...")
+        
+        # 实现重连逻辑
+        for attempt in range(1, 11):  # 最多重连10次
+            try:
+                print(f"🔄 第{attempt}次重连尝试...")
+                self.push_client.connect(self.client_config.tiger_id, self.client_config.private_key)
+                print("✅ 重连成功")
+                return
+            except Exception as e:
+                print(f"❌ 第{attempt}次重连失败: {e}")
+                time.sleep(min(attempt * 2, 30))  # 指数退避，最大30秒
+        
+        print("❌ 重连失败，请检查网络连接")
+    
+    def _on_error(self, frame):
+        """错误回调"""
+        print(f"❌ 推送客户端错误: {frame}")
+    
+    def _on_subscribe(self, frame):
+        """订阅成功回调"""
+        print(f"✅ 订阅成功: {frame}")
+    
+    def _on_unsubscribe(self, frame):
+        """取消订阅回调"""
+        print(f"✅ 取消订阅成功: {frame}")
+    
+    def _on_query_subscribed(self, data):
+        """查询已订阅行情回调"""
+        try:
+            if isinstance(data, str):
+                import json
+                data = json.loads(data)
+            
+            print(f"📋 已订阅行情信息:")
+            
+            # 基本行情订阅信息
+            if 'subscribed_symbols' in data:
+                print(f"  基本行情: {data['subscribed_symbols']} (已用: {data.get('used', 0)}/{data.get('limit', 0)})")
+            
+            # 深度行情订阅信息
+            if 'subscribed_quote_depth_symbols' in data:
+                print(f"  深度行情: {data['subscribed_quote_depth_symbols']} (已用: {data.get('quote_depth_used', 0)}/{data.get('quote_depth_limit', 0)})")
+            else:
+                print(f"  深度行情: 无权限或未订阅")
+            
+            # 逐笔成交订阅信息
+            if 'subscribed_trade_tick_symbols' in data:
+                print(f"  逐笔成交: {data['subscribed_trade_tick_symbols']} (已用: {data.get('trade_tick_used', 0)}/{data.get('trade_tick_limit', 0)})")
+            
+            # K线订阅信息
+            if 'kline_used' in data:
+                print(f"  K线数据: 已用 {data.get('kline_used', 0)}/{data.get('kline_limit', 0)}")
+            
+        except Exception as e:
+            print(f"❌ 解析订阅信息失败: {e}")
+            print(f"   原始数据: {data}")
+    
+    def connect_push_client(self):
+        """连接推送客户端"""
+        try:
+            if not self.is_push_connected:
+                self.push_client.connect(self.client_config.tiger_id, self.client_config.private_key)
+                print("✅ 推送客户端连接成功")
+            else:
+                print("ℹ️ 推送客户端已连接")
+        except Exception as e:
+            print(f"❌ 推送客户端连接失败: {e}")
+            raise
+    
+    def disconnect_push_client(self):
+        """断开推送客户端连接"""
+        try:
+            if self.is_push_connected:
+                self.push_client.disconnect()
+                self.is_push_connected = False
+                print("✅ 推送客户端已断开")
+            else:
+                print("ℹ️ 推送客户端未连接")
+        except Exception as e:
+            print(f"❌ 推送客户端断开失败: {e}")
+    
+    def register_quote_depth_changed_listener(self, listener: Callable[[QuoteDepthData], None], symbols: List[str]):
+        """
+        注册深度行情变化监听器
+        
+        Args:
+            listener: 深度行情变化回调函数，参数为QuoteDepthData
+            symbols: 要订阅的股票代码列表
+        """
+        try:
+            # 确保推送连接已建立
+            self.connect_push_client()
+            
+            # 注册监听器
+            if listener not in self.depth_quote_listeners:
+                self.depth_quote_listeners.append(listener)
+                print(f"✅ 深度行情监听器已注册，当前监听器数量: {len(self.depth_quote_listeners)}")
+            
+            # 订阅深度行情
+            self.push_client.subscribe_depth_quote(symbols)
+            print(f"✅ 已订阅深度行情: {symbols}")
+            
+        except Exception as e:
+            print(f"❌ 注册深度行情监听器失败: {e}")
+            raise
+    
+    def unregister_quote_depth_changed_listener(self, listener: Callable[[QuoteDepthData], None]):
+        """
+        取消注册深度行情变化监听器
+        
+        Args:
+            listener: 要取消注册的监听器
+        """
+        try:
+            if listener in self.depth_quote_listeners:
+                self.depth_quote_listeners.remove(listener)
+                print(f"✅ 深度行情监听器已取消注册，当前监听器数量: {len(self.depth_quote_listeners)}")
+            else:
+                print("⚠️ 监听器未找到")
+        except Exception as e:
+            print(f"❌ 取消注册深度行情监听器失败: {e}")
+    
+    def register_quote_changed_listener(self, listener: Callable[[QuoteBasicData], None], symbols: List[str]):
+        """
+        注册基本行情变化监听器
+        
+        Args:
+            listener: 基本行情变化回调函数，参数为QuoteBasicData
+            symbols: 要订阅的股票代码列表
+        """
+        try:
+            self.connect_push_client()
+            
+            if listener not in self.quote_listeners:
+                self.quote_listeners.append(listener)
+                print(f"✅ 基本行情监听器已注册，当前监听器数量: {len(self.quote_listeners)}")
+            
+            self.push_client.subscribe_quote(symbols)
+            print(f"✅ 已订阅基本行情: {symbols}")
+            
+        except Exception as e:
+            print(f"❌ 注册基本行情监听器失败: {e}")
+            raise
+    
+    def register_quote_bbo_changed_listener(self, listener: Callable[[QuoteBBOData], None], symbols: List[str]):
+        """
+        注册最优报价变化监听器
+        
+        Args:
+            listener: 最优报价变化回调函数，参数为QuoteBBOData
+            symbols: 要订阅的股票代码列表
+        """
+        try:
+            self.connect_push_client()
+            
+            if listener not in self.bbo_listeners:
+                self.bbo_listeners.append(listener)
+                print(f"✅ 最优报价监听器已注册，当前监听器数量: {len(self.bbo_listeners)}")
+            
+            # 老虎证券的BBO数据通常通过基本行情订阅获得
+            self.push_client.subscribe_quote(symbols)
+            print(f"✅ 已订阅最优报价: {symbols}")
+            
+        except Exception as e:
+            print(f"❌ 注册最优报价监听器失败: {e}")
+            raise
+    
+    def query_subscribed_quotes(self):
+        """查询已订阅的行情"""
+        try:
+            self.push_client.query_subscribed_quote()
+            print("✅ 已发送查询已订阅行情请求")
+        except Exception as e:
+            print(f"❌ 查询已订阅行情失败: {e}")
+    
+    def get_qqq_optimal_0dte_options(self, strategy: str = 'balanced', top_n: int = 5) -> dict:
+        """
+        获取QQQ最优末日期权（重构版本）
+        
+        Args:
+            strategy: 策略类型 ('liquidity', 'balanced', 'value')
+            top_n: 返回最优期权数量
+            
+        Returns:
+            dict: 包含Call和Put的最优期权列表
+        """
+        try:
+            from datetime import datetime
+            from ..services.option_analyzer import OptionAnalyzer
+            from ..config.option_config import OptionStrategy, OPTION_CONFIG
+            from ..models.option_models import OptionFilter
+            from ..utils.data_validator import DataValidator
+            
+            print(f"🔍 开始获取QQQ末日期权，策略: {strategy}")
+            
+            # 数据验证
+            validator = DataValidator()
+            if not validator.validate_strategy(strategy):
+                return {'calls': [], 'puts': [], 'error': f'无效的策略: {strategy}'}
+            
+            if not validator.validate_top_n(top_n):
+                return {'calls': [], 'puts': [], 'error': f'无效的top_n值: {top_n}'}
+            
+            # 获取QQQ当前价格
+            qqq_brief = self.quote_client.get_briefs(['QQQ'])
+            if not qqq_brief or len(qqq_brief) == 0:
+                return {'calls': [], 'puts': [], 'error': '无法获取QQQ当前价格'}
+            
+            current_price = qqq_brief[0].latest_price
+            if not validator.validate_price(current_price):
+                return {'calls': [], 'puts': [], 'error': f'无效的QQQ价格: {current_price}'}
+            
+            print(f"📊 QQQ当前价格: ${current_price:.2f}")
+            
+            # 获取今日到期的期权链
+            today = datetime.now().strftime('%Y-%m-%d')
+            print("🔍 获取今日到期期权链...")
+            option_chains = self.quote_client.get_option_chain('QQQ', expiry=today)
+            
+            # 初始化分析器
+            analyzer = OptionAnalyzer(OPTION_CONFIG)
+            
+            # 创建筛选条件
+            option_filter = OptionFilter(
+                min_volume=OPTION_CONFIG.MIN_VOLUME_THRESHOLD,
+                min_open_interest=OPTION_CONFIG.MIN_OPEN_INTEREST_THRESHOLD,
+                max_spread_percentage=OPTION_CONFIG.MAX_SPREAD_PERCENTAGE
+            )
+            
+            # 执行分析
+            strategy_enum = OptionStrategy(strategy)
+            result = analyzer.analyze_options(
+                option_chains=option_chains,
+                current_price=current_price,
+                strategy=strategy_enum,
+                top_n=top_n,
+                option_filter=option_filter
+            )
+            
+            print(f"🎯 最优期权筛选完成: {len(result.calls)} Call, {len(result.puts)} Put")
+            return result.to_dict()
+            
+        except Exception as e:
+            print(f"❌ 获取QQQ最优末日期权失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return {'calls': [], 'puts': [], 'error': str(e)}
+    
+ 

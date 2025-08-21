@@ -7,7 +7,7 @@ Created on 2018/10/30
 import json
 import time
 
-from tigeropen.common.consts import OrderStatus
+from tigeropen.common.consts import OrderStatus, QuoteKeyType
 from tigeropen.common.consts import StockRankingIndicator, OptionRankingIndicator
 from tigeropen.push.pb.AssetData_pb2 import AssetData
 from tigeropen.push.pb.KlineData_pb2 import KlineData
@@ -254,10 +254,6 @@ def on_asset_changed(frame: AssetData):
     timestamp: 1677745420121
     """
     print(f'on_asset_changed: {frame}')
-    # 查看可用资金
-    print(frame.availableFunds)
-    # 查看持仓市值
-    print(frame.grossPositionValue)
 
 
 def on_position_changed(frame: PositionData):
@@ -344,7 +340,7 @@ if __name__ == '__main__':
     # 订单执行明细回调
     push_client.transaction_changed = on_transaction_changed
     # 资产变动回调
-    push_client.asset_changed = on_asset_changed
+    # push_client.asset_changed = on_asset_changed
     # 持仓变动回调
     push_client.position_changed = on_position_changed
 
@@ -369,35 +365,34 @@ if __name__ == '__main__':
     push_client.disconnect_callback = disconnect_callback
 
     # 订阅行情
-    push_client.subscribe_quote(['00700', 'GOOG'])
+    push_client.subscribe_quote(['00700'])
     # 可以指定关注的行情key的类型, QuoteKeyType.TRADE 为成交数据, QuoteKeyType.QUOTE 为盘口数据
-    # push_client.subscribe_quote(['MSFT', 'AMD'], quote_key_type=QuoteKeyType.TRADE)
+    push_client.subscribe_quote(['00700'], quote_key_type=QuoteKeyType.TRADE)
 
     # 订阅深度行情
-    push_client.subscribe_depth_quote(['00700', 'BABA'])
+    push_client.subscribe_depth_quote(['00700'])
 
     # 订阅逐笔数据
-    push_client.subscribe_tick(['00700', 'QQQ'])
-    push_client.subscribe_tick(['HSImain'])
+    push_client.subscribe_tick(['00700'])
 
-    # 订阅资产变动
-    push_client.subscribe_asset()
-    # 订阅订单变动
-    push_client.subscribe_order()
-    # 订阅订单执行明细
-    push_client.subscribe_transaction()
-    # 订阅持仓变动
-    push_client.subscribe_position()
-    # 查询已订阅的 symbol
+    # # 订阅资产变动
+    # push_client.subscribe_asset()
+    # # 订阅订单变动
+    # push_client.subscribe_order()
+    # # 订阅订单执行明细
+    # push_client.subscribe_transaction()
+    # # 订阅持仓变动
+    # push_client.subscribe_position()
+    # # 查询已订阅的 symbol
     push_client.query_subscribed_quote()
-
-    # 订阅股票榜单数据
-    push_client.subscribe_stock_top("HK", [StockRankingIndicator.Amount, StockRankingIndicator.ChangeRate])
-    # 订阅期权榜单数据
-    push_client.subscribe_option_top("US", [OptionRankingIndicator.Amount])
+    #
+    # # 订阅股票榜单数据
+    # push_client.subscribe_stock_top("HK", [StockRankingIndicator.Amount, StockRankingIndicator.ChangeRate])
+    # # 订阅期权榜单数据
+    # push_client.subscribe_option_top("US", [OptionRankingIndicator.Amount])
 
     # 订阅k线数据
-    push_client.subscribe_kline(["AAPL", "GOOG"])
+    push_client.subscribe_kline(["00700"])
 
     time.sleep(600)
     push_client.disconnect()

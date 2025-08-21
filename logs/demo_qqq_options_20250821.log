@@ -1,0 +1,51 @@
+2025-08-21 18:08:05 - demo_qqq_options - INFO - initialize_api:39 - 🔧 初始化老虎证券API...
+2025-08-21 18:08:06 - demo_qqq_options - INFO - initialize_api:41 - ✅ API初始化成功
+2025-08-21 18:08:06 - demo_qqq_options - INFO - analyze_strategies:52 - 🔍 正在分析 liquidity 策略...
+2025-08-21 18:08:06 - demo_qqq_options - INFO - _explain_strategy:106 - 💡 流动性优先策略:
+2025-08-21 18:08:06 - demo_qqq_options - INFO - _explain_strategy:107 -    策略描述: 重点关注成交量和未平仓合约，最小化交易成本
+2025-08-21 18:08:06 - demo_qqq_options - INFO - _explain_strategy:108 -    适用场景: 大资金量交易，需要快速进出场
+2025-08-21 18:08:06 - demo_qqq_options - INFO - _explain_strategy:109 -    权重配置: 流动性50% + 价差30% + 希腊字母10% + 价值10%
+2025-08-21 18:08:07 - demo_qqq_options - INFO - analyze_strategies:52 - 🔍 正在分析 balanced 策略...
+2025-08-21 18:08:07 - demo_qqq_options - INFO - _explain_strategy:106 - 💡 平衡策略:
+2025-08-21 18:08:07 - demo_qqq_options - INFO - _explain_strategy:107 -    策略描述: 综合考虑各项指标，寻求风险收益平衡
+2025-08-21 18:08:07 - demo_qqq_options - INFO - _explain_strategy:108 -    适用场景: 一般投资者，追求稳健收益
+2025-08-21 18:08:07 - demo_qqq_options - INFO - _explain_strategy:109 -    权重配置: 各项指标均等权重25%
+2025-08-21 18:08:08 - demo_qqq_options - INFO - analyze_strategies:52 - 🔍 正在分析 value 策略...
+2025-08-21 18:08:08 - demo_qqq_options - INFO - _explain_strategy:106 - 💡 价值导向策略:
+2025-08-21 18:08:08 - demo_qqq_options - INFO - _explain_strategy:107 -    策略描述: 重点关注期权定价合理性，寻找价值洼地
+2025-08-21 18:08:08 - demo_qqq_options - INFO - _explain_strategy:108 -    适用场景: 专业投资者，基于量化分析
+2025-08-21 18:08:08 - demo_qqq_options - INFO - _explain_strategy:109 -    权重配置: 价值40% + 希腊字母30% + 流动性20% + 价差10%
+2025-08-21 18:08:42 - demo_qqq_options - INFO - initialize_api:39 - 🔧 初始化老虎证券API...
+2025-08-21 18:08:42 - demo_qqq_options - INFO - initialize_api:41 - ✅ API初始化成功
+2025-08-21 18:08:42 - demo_qqq_options - INFO - analyze_strategies:52 - 🔍 正在分析 liquidity 策略...
+2025-08-21 18:08:42 - demo_qqq_options - INFO - _explain_strategy:106 - 💡 流动性优先策略:
+2025-08-21 18:08:42 - demo_qqq_options - INFO - _explain_strategy:107 -    策略描述: 重点关注成交量和未平仓合约，最小化交易成本
+2025-08-21 18:08:42 - demo_qqq_options - INFO - _explain_strategy:108 -    适用场景: 大资金量交易，需要快速进出场
+2025-08-21 18:08:42 - demo_qqq_options - INFO - _explain_strategy:109 -    权重配置: 流动性50% + 价差30% + 希腊字母10% + 价值10%
+2025-08-21 18:08:44 - demo_qqq_options - INFO - analyze_strategies:52 - 🔍 正在分析 balanced 策略...
+2025-08-21 18:08:44 - demo_qqq_options - INFO - _explain_strategy:106 - 💡 平衡策略:
+2025-08-21 18:08:44 - demo_qqq_options - INFO - _explain_strategy:107 -    策略描述: 综合考虑各项指标，寻求风险收益平衡
+2025-08-21 18:08:44 - demo_qqq_options - INFO - _explain_strategy:108 -    适用场景: 一般投资者，追求稳健收益
+2025-08-21 18:08:44 - demo_qqq_options - INFO - _explain_strategy:109 -    权重配置: 各项指标均等权重25%
+2025-08-21 18:08:45 - demo_qqq_options - INFO - analyze_strategies:52 - 🔍 正在分析 value 策略...
+2025-08-21 18:08:45 - demo_qqq_options - INFO - _explain_strategy:106 - 💡 价值导向策略:
+2025-08-21 18:08:45 - demo_qqq_options - INFO - _explain_strategy:107 -    策略描述: 重点关注期权定价合理性，寻找价值洼地
+2025-08-21 18:08:45 - demo_qqq_options - INFO - _explain_strategy:108 -    适用场景: 专业投资者，基于量化分析
+2025-08-21 18:08:45 - demo_qqq_options - INFO - _explain_strategy:109 -    权重配置: 价值40% + 希腊字母30% + 流动性20% + 价差10%
+2025-08-21 18:12:46 - demo_qqq_options - INFO - initialize_api:39 - 🔧 初始化老虎证券API...
+2025-08-21 18:12:47 - demo_qqq_options - INFO - initialize_api:41 - ✅ API初始化成功
+2025-08-21 18:12:47 - demo_qqq_options - INFO - analyze_strategies:52 - 🔍 正在分析 liquidity 策略...
+2025-08-21 18:12:47 - demo_qqq_options - INFO - _explain_strategy:106 - 💡 流动性优先策略:
+2025-08-21 18:12:47 - demo_qqq_options - INFO - _explain_strategy:107 -    策略描述: 重点关注成交量和未平仓合约，最小化交易成本
+2025-08-21 18:12:47 - demo_qqq_options - INFO - _explain_strategy:108 -    适用场景: 大资金量交易，需要快速进出场
+2025-08-21 18:12:47 - demo_qqq_options - INFO - _explain_strategy:109 -    权重配置: 流动性50% + 价差30% + 希腊字母10% + 价值10%
+2025-08-21 18:12:48 - demo_qqq_options - INFO - analyze_strategies:52 - 🔍 正在分析 balanced 策略...
+2025-08-21 18:12:48 - demo_qqq_options - INFO - _explain_strategy:106 - 💡 平衡策略:
+2025-08-21 18:12:48 - demo_qqq_options - INFO - _explain_strategy:107 -    策略描述: 综合考虑各项指标，寻求风险收益平衡
+2025-08-21 18:12:48 - demo_qqq_options - INFO - _explain_strategy:108 -    适用场景: 一般投资者，追求稳健收益
+2025-08-21 18:12:48 - demo_qqq_options - INFO - _explain_strategy:109 -    权重配置: 各项指标均等权重25%
+2025-08-21 18:12:49 - demo_qqq_options - INFO - analyze_strategies:52 - 🔍 正在分析 value 策略...
+2025-08-21 18:12:49 - demo_qqq_options - INFO - _explain_strategy:106 - 💡 价值导向策略:
+2025-08-21 18:12:49 - demo_qqq_options - INFO - _explain_strategy:107 -    策略描述: 重点关注期权定价合理性，寻找价值洼地
+2025-08-21 18:12:49 - demo_qqq_options - INFO - _explain_strategy:108 -    适用场景: 专业投资者，基于量化分析
+2025-08-21 18:12:49 - demo_qqq_options - INFO - _explain_strategy:109 -    权重配置: 价值40% + 希腊字母30% + 流动性20% + 价差10%
