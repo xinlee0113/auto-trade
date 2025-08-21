@@ -132,8 +132,8 @@ class RealTimeTechnicalIndicators:
             
             self.last_update = timestamp
             
-            # 如果数据足够，计算指标
-            if len(self.price_data) >= 2:  # 至少需要2个数据点进行EMA计算
+            # 分层计算指标，根据数据量逐步启用功能
+            if len(self.price_data) >= 1:  # 从第一个数据点开始计算EMA
                 self._calculate_all_indicators()
                 self.calculation_count += 1
             
@@ -174,11 +174,11 @@ class RealTimeTechnicalIndicators:
     def _calculate_ema(self, current_price: float, timestamp: datetime) -> Optional[EMAData]:
         """计算EMA指标"""
         try:
-            # 初始化EMA
+            # 初始化EMA - 第一个价格作为EMA初始值，返回但不进行计算
             if self.current_ema3 is None:
                 self.current_ema3 = current_price
                 self.current_ema8 = current_price
-                # 第一次计算也创建EMA数据记录
+                # 第一次初始化，返回初始EMA值
                 return EMAData(
                     timestamp=timestamp,
                     price=current_price,
@@ -242,8 +242,8 @@ class RealTimeTechnicalIndicators:
     def _calculate_momentum(self, current_price: float, timestamp: datetime) -> Optional[MomentumData]:
         """计算动量指标"""
         try:
-            # 需要足够的历史数据
-            if len(self.price_data) < 60:  # 至少1分钟数据
+            # 动量计算需要更多历史数据才能准确
+            if len(self.price_data) < 10:  # 至少10秒数据才开始动量计算
                 return None
             
             prices = list(self.price_data)
@@ -326,14 +326,15 @@ class RealTimeTechnicalIndicators:
     def _calculate_volume_indicators(self, current_volume: int, timestamp: datetime) -> Optional[VolumeData]:
         """计算成交量指标"""
         try:
-            # 需要足够的历史数据
-            if len(self.volume_data) < 30:
+            # 成交量分析需要一定历史数据建立基线
+            if len(self.volume_data) < 5:  # 至少5个数据点建立基线
                 return None
             
             volumes = list(self.volume_data)
             
-            # 计算平均成交量 (过去5分钟)
-            avg_volume = np.mean(volumes[-300:]) if len(volumes) >= 300 else np.mean(volumes)
+            # 计算平均成交量 (排除当前成交量，只用历史数据)
+            historical_volumes = volumes[:-1]  # 排除当前成交量
+            avg_volume = np.mean(historical_volumes[-300:]) if len(historical_volumes) >= 300 else np.mean(historical_volumes)
             
             # 成交量比率
             volume_ratio = current_volume / avg_volume if avg_volume > 0 else 1.0
