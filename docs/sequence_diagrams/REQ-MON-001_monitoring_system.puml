@@ -1,0 +1,532 @@
+@startuml REQ-MON-001 实时监控体系流程时序图
+!theme plain
+
+title REQ-MON-001: 实时监控体系 - 跨类流程时序图
+
+participant "SystemController" as SC
+participant "TradingOrchestrator" as TO
+participant "RiskManagementService" as RMS
+participant "OptionTradingService" as OTS
+participant "MarketAnalysisService" as MAS
+participant "DataAccessLayer" as DAL
+participant "LoggingUtility" as LU
+participant "ValidationUtility" as VU
+
+note over SC, VU
+  **需求**: REQ-MON-001 实时监控体系
+  **交易监控面板**: 实时PnL、持仓Greeks、风险敞口、市场状态
+  **性能监控面板**: 策略胜率、持仓时间、执行质量、系统性能
+  **风险监控面板**: 限额使用率、异常告警、市场评估、紧急状态
+  **响应时间**: <3秒、支持自定义指标、历史查询导出
+end note
+
+== 1. 监控体系初始化 ==
+
+SC -> SC: initialize_monitoring_system()
+activate SC
+
+== 1.1 交易监控面板初始化 ==
+
+SC -> TO: setup_trading_monitoring_panel()
+activate TO
+
+TO -> TO: initialize_pnl_monitoring()
+note right TO
+  PnL监控配置:
+  - 实时未实现PnL计算
+  - 已实现PnL累计
+  - 分标的PnL分解
+  - 分策略PnL分析
+  - PnL趋势分析和预测
+end note
+
+TO -> RMS: setup_greeks_monitoring()
+activate RMS
+
+RMS -> RMS: configure_greeks_display()
+note right RMS
+  Greeks监控配置:
+  - 实时组合Greeks展示
+  - 单个持仓Greeks详情
+  - Greeks风险敞口可视化
+  - Greeks历史变化趋势
+  - Greeks预警阈值设置
+end note
+
+RMS --> TO: greeks_monitoring_configured
+deactivate RMS
+
+TO -> MAS: setup_market_state_monitoring()
+activate MAS
+
+MAS -> MAS: configure_market_indicators()
+note right MAS
+  市场状态监控:
+  - VIX实时变化监控
+  - 成交量异动检测
+  - 技术指标状态展示
+  - 市场情绪指标
+  - 异动等级实时显示
+end note
+
+MAS --> TO: market_monitoring_configured
+deactivate MAS
+
+TO --> SC: trading_panel_ready
+deactivate TO
+
+== 1.2 性能监控面板初始化 ==
+
+SC -> OTS: setup_performance_monitoring_panel()
+activate OTS
+
+OTS -> OTS: initialize_strategy_performance_tracking()
+note right OTS
+  策略性能监控:
+  - 胜率统计和趋势
+  - 平均收益率计算
+  - 策略效率指标
+  - 成功失败案例分析
+  - 策略优化建议
+end note
+
+OTS -> OTS: setup_execution_quality_monitoring()
+note right OTS
+  执行质量监控:
+  - 平均执行延迟
+  - 滑点控制效果
+  - 成交率统计
+  - 价格改善分析
+  - 执行场所效率对比
+end note
+
+OTS -> DAL: setup_system_performance_monitoring()
+activate DAL
+
+DAL -> DAL: configure_system_metrics()
+note right DAL
+  系统性能监控:
+  - CPU使用率监控
+  - 内存使用情况
+  - 网络延迟统计
+  - 数据处理吞吐量
+  - 系统响应时间
+end note
+
+DAL --> OTS: system_monitoring_configured
+deactivate DAL
+
+OTS --> SC: performance_panel_ready
+deactivate OTS
+
+== 1.3 风险监控面板初始化 ==
+
+SC -> RMS: setup_risk_monitoring_panel()
+activate RMS
+
+RMS -> RMS: initialize_risk_limits_monitoring()
+note right RMS
+  风险限额监控:
+  - 资金使用率实时显示
+  - 交易频率统计
+  - 限额接近预警
+  - 风险集中度分析
+  - 限额违规记录
+end note
+
+RMS -> RMS: setup_emergency_monitoring()
+note right RMS
+  紧急监控配置:
+  - 系统性风险指标
+  - 连接状态监控
+  - 异常波动检测
+  - 紧急止损状态
+  - 应急预案激活状态
+end note
+
+RMS --> SC: risk_panel_ready
+deactivate RMS
+
+SC --> SC: all_monitoring_panels_initialized
+deactivate SC
+
+== 2. 实时监控数据收集 ==
+
+loop 实时监控循环 (每秒)
+    SC -> SC: collect_monitoring_data()
+    activate SC
+    
+    == 2.1 交易监控数据收集 ==
+    
+    par 并行数据收集
+        SC -> TO: collect_pnl_data()
+        activate TO
+        
+        TO -> OTS: get_current_positions()
+        activate OTS
+        OTS --> TO: positions_list[]
+        deactivate OTS
+        
+        TO -> TO: calculate_real_time_pnl()
+        note right TO
+          实时PnL计算:
+          for position in positions:
+              current_value = get_current_market_value(position)
+              unrealized_pnl = current_value - position.cost_basis
+              position.pnl_pct = unrealized_pnl / position.cost_basis
+          
+          total_unrealized_pnl = sum(position.unrealized_pnl)
+          total_realized_pnl = sum(closed_positions.realized_pnl)
+          net_pnl = total_unrealized_pnl + total_realized_pnl
+        end note
+        
+        TO --> SC: PnLData(unrealized, realized, net, by_symbol, by_strategy)
+        deactivate TO
+
+    also
+        SC -> RMS: collect_greeks_data()
+        activate RMS
+        
+        RMS -> RMS: aggregate_portfolio_greeks()
+        note right RMS
+          组合Greeks聚合:
+          portfolio_delta = sum(position.delta * position.quantity)
+          portfolio_gamma = sum(position.gamma * position.quantity)
+          portfolio_theta = sum(position.theta * position.quantity)
+          portfolio_vega = sum(position.vega * position.quantity)
+          
+          greeks_risk_score = calculate_greeks_risk(portfolio_greeks)
+        end note
+        
+        RMS --> SC: GreeksData(portfolio_greeks, risk_score, warnings)
+        deactivate RMS
+
+    also
+        SC -> MAS: collect_market_state_data()
+        activate MAS
+        
+        MAS -> DAL: get_current_market_indicators()
+        activate DAL
+        DAL --> MAS: market_indicators(vix, volume_ratios, volatility)
+        deactivate DAL
+        
+        MAS -> MAS: assess_current_market_state()
+        note right MAS
+          市场状态评估:
+          current_market_state = determine_market_condition()
+          anomaly_level = detect_current_anomaly_level()
+          market_sentiment = analyze_market_sentiment()
+          trading_opportunity_score = calculate_opportunity_score()
+        end note
+        
+        MAS --> SC: MarketStateData(state, anomaly_level, sentiment, opportunities)
+        deactivate MAS
+    end
+    
+    == 2.2 性能监控数据收集 ==
+    
+    par 并行性能数据收集
+        SC -> OTS: collect_strategy_performance_data()
+        activate OTS
+        
+        OTS -> OTS: calculate_strategy_metrics()
+        note right OTS
+          策略性能计算:
+          today_trades = get_trades_today()
+          win_rate = len([t for t in today_trades if t.pnl > 0]) / len(today_trades)
+          avg_holding_time = mean([t.duration for t in today_trades])
+          avg_return = mean([t.return_pct for t in today_trades])
+          sharpe_ratio = calculate_sharpe_ratio(today_trades)
+        end note
+        
+        OTS --> SC: StrategyPerformanceData(win_rate, avg_return, sharpe, holding_time)
+        deactivate OTS
+
+    also
+        SC -> DAL: collect_system_performance_data()
+        activate DAL
+        
+        DAL -> DAL: gather_system_metrics()
+        note right DAL
+          系统性能采集:
+          cpu_usage = get_cpu_utilization()
+          memory_usage = get_memory_utilization()
+          network_latency = measure_network_latency()
+          data_processing_rate = calculate_throughput()
+          api_response_time = measure_api_latency()
+        end note
+        
+        DAL --> SC: SystemPerformanceData(cpu, memory, network, throughput, latency)
+        deactivate DAL
+    end
+    
+    == 2.3 风险监控数据收集 ==
+    
+    SC -> RMS: collect_risk_monitoring_data()
+    activate RMS
+    
+    RMS -> RMS: assess_risk_limits_usage()
+    note right RMS
+      风险限额使用率:
+      fund_usage_pct = current_exposure / total_capital
+      trade_frequency_usage = today_trades / daily_limit
+      concentration_risk = max_single_position / total_portfolio
+      
+      limit_warnings = check_approaching_limits()
+      limit_violations = check_limit_breaches()
+    end note
+    
+    RMS -> RMS: detect_risk_anomalies()
+    note right RMS
+      风险异常检测:
+      portfolio_volatility_spike = detect_volatility_increase()
+      correlation_breakdown = detect_correlation_anomalies()
+      liquidity_deterioration = assess_liquidity_quality()
+      
+      emergency_conditions = evaluate_emergency_triggers()
+    end note
+    
+    RMS --> SC: RiskMonitoringData(limits_usage, warnings, violations, emergencies)
+    deactivate RMS
+    
+    deactivate SC
+end
+
+== 3. 监控面板数据更新 ==
+
+SC -> SC: update_monitoring_panels(collected_data)
+activate SC
+
+== 3.1 交易监控面板更新 ==
+
+SC -> SC: update_trading_panel()
+note right SC
+  交易面板更新:
+  - PnL实时数字和图表更新
+  - Greeks风险敞口仪表盘
+  - 持仓详情表格刷新
+  - 市场状态指示灯更新
+  - 异动等级显示更新
+end note
+
+== 3.2 性能监控面板更新 ==
+
+SC -> SC: update_performance_panel()
+note right SC
+  性能面板更新:
+  - 策略胜率趋势图更新
+  - 执行质量指标刷新
+  - 系统性能仪表盘更新
+  - 历史绩效对比图表
+  - 优化建议提示更新
+end note
+
+== 3.3 风险监控面板更新 ==
+
+SC -> SC: update_risk_panel()
+note right SC
+  风险面板更新:
+  - 限额使用率进度条
+  - 风险告警状态指示
+  - 紧急状态控制面板
+  - 风险指标趋势图
+  - 应急操作按钮状态
+end note
+
+deactivate SC
+
+== 4. 监控告警处理 ==
+
+SC -> VU: evaluate_monitoring_alerts(monitoring_data)
+activate VU
+
+== 4.1 PnL告警检查 ==
+
+VU -> VU: check_pnl_thresholds()
+note right VU
+  PnL告警条件:
+  - 单日亏损 > 5%
+  - 未实现亏损 > 10%
+  - 连续亏损 > 3笔
+  - 回撤幅度 > 8%
+end note
+
+== 4.2 Greeks风险告警检查 ==
+
+VU -> VU: check_greeks_risk_thresholds()
+note right VU
+  Greeks告警条件:
+  - |组合Delta| > 150
+  - 组合Gamma > 75
+  - 日Theta衰减 > $1500
+  - |组合Vega| > $800
+end note
+
+== 4.3 系统性能告警检查 ==
+
+VU -> VU: check_system_performance_thresholds()
+note right VU
+  系统性能告警:
+  - CPU使用率 > 80%
+  - 内存使用率 > 85%
+  - API延迟 > 3秒
+  - 数据延迟 > 1秒
+end note
+
+== 4.4 风险限额告警检查 ==
+
+VU -> VU: check_risk_limit_thresholds()
+note right VU
+  风险限额告警:
+  - 资金使用率 > 90%
+  - 交易频率接近限额
+  - 集中度风险 > 阈值
+  - 任何限额违规
+end note
+
+alt 发现告警条件
+    VU -> LU: generate_monitoring_alert(alert_type, severity, details)
+    activate LU
+    
+    LU -> LU: log_alert_details()
+    LU -> LU: send_immediate_notification()
+    note right LU
+      告警通知:
+      - 控制台弹窗提示
+      - 邮件通知发送
+      - 短信紧急通知
+      - 系统日志记录
+    end note
+    
+    LU --> VU: alert_notification_sent
+    deactivate LU
+    
+    VU -> SC: trigger_alert_response(alert_info)
+    activate SC
+    
+    alt 严重告警
+        SC -> RMS: initiate_emergency_procedures(alert_info)
+        activate RMS
+        RMS -> RMS: execute_emergency_risk_control()
+        RMS --> SC: emergency_response_activated
+        deactivate RMS
+        
+    else 一般告警
+        SC -> SC: log_alert_and_continue_monitoring()
+    end
+    
+    deactivate SC
+
+else 无告警条件
+    VU -> VU: continue_normal_monitoring()
+end
+
+VU --> SC: alert_evaluation_complete
+deactivate VU
+
+== 5. 自定义监控指标 ==
+
+SC -> SC: support_custom_monitoring_metrics()
+activate SC
+
+SC -> VU: validate_custom_metric_definition(metric_config)
+activate VU
+
+VU -> VU: check_metric_feasibility()
+note right VU
+  自定义指标验证:
+  - 数据源可用性确认
+  - 计算逻辑有效性检查
+  - 性能影响评估
+  - 安全性验证
+end note
+
+alt 自定义指标有效
+    VU --> SC: custom_metric_approved(metric_definition)
+    
+    SC -> SC: implement_custom_metric(metric_definition)
+    note right SC
+      自定义指标实现:
+      - 添加数据收集逻辑
+      - 集成计算算法
+      - 更新显示界面
+      - 配置告警规则
+    end note
+    
+else 自定义指标无效
+    VU --> SC: custom_metric_rejected(rejection_reason)
+end
+deactivate VU
+
+deactivate SC
+
+== 6. 历史数据查询和导出 ==
+
+SC -> DAL: handle_historical_data_request(query_params)
+activate DAL
+
+DAL -> DAL: validate_query_parameters()
+note right DAL
+  查询参数验证:
+  - 时间范围合理性
+  - 数据量限制检查
+  - 权限验证
+  - 查询复杂度评估
+end note
+
+DAL -> DAL: execute_historical_query()
+note right DAL
+  历史数据查询:
+  - 优化查询性能
+  - 分页结果处理
+  - 数据聚合计算
+  - 格式化输出结果
+end note
+
+DAL -> DAL: prepare_export_data(export_format)
+note right DAL
+  数据导出准备:
+  - CSV格式导出
+  - Excel格式导出
+  - JSON格式导出
+  - PDF报告生成
+end note
+
+DAL --> SC: HistoricalDataResult(data, export_file, query_stats)
+deactivate DAL
+
+== 7. 监控系统性能优化 ==
+
+SC -> VU: optimize_monitoring_performance()
+activate VU
+
+VU -> VU: analyze_monitoring_overhead()
+note right VU
+  监控性能分析:
+  - 数据收集成本分析
+  - 界面更新频率优化
+  - 缓存策略改进
+  - 查询效率提升
+end note
+
+VU -> VU: implement_performance_improvements()
+note right VU
+  性能优化实施:
+  - 智能数据采样
+  - 增量更新机制
+  - 异步处理优化
+  - 内存使用优化
+end note
+
+VU --> SC: monitoring_performance_optimized
+deactivate VU
+
+note over SC, VU
+  **验收标准**:
+  ✓ 监控面板响应时间<3秒
+  ✓ 支持自定义监控指标
+  ✓ 告警及时性和准确性
+  ✓ 历史数据查询和导出
+end note
+
+@enduml

@@ -1,0 +1,440 @@
+@startuml REQ-SYS-002 实时计算引擎流程时序图
+!theme plain
+
+title REQ-SYS-002: 实时计算引擎 - 跨类流程时序图
+
+participant "MarketAnalysisService" as MAS
+participant "GreeksCalculationEngine" as GCE
+participant "TechnicalAnalysisEngine" as TAE
+participant "RiskCalculationEngine" as RCE
+participant "DataAccessLayer" as DAL
+participant "CacheRepository" as CR
+participant "ValidationUtility" as VU
+participant "ConfigurationManager" as CM
+
+note over MAS, CM
+  **需求**: REQ-SYS-002 实时计算引擎
+  **四大引擎**: Black-Scholes、Greeks计算、技术指标、风险计算
+  **性能要求**: 计算精度达标、实时性满足要求、支持并行扩展
+  **质量要求**: 计算结果可验证和审计
+end note
+
+== 1. 计算引擎系统初始化 ==
+
+MAS -> CM: initialize_calculation_engines()
+activate CM
+
+CM -> CM: load_calculation_parameters()
+note right CM
+  计算参数配置:
+  - BLACK_SCHOLES_PARAMS: 无风险利率、迭代次数
+  - GREEKS_PRECISION: 计算精度要求
+  - TECHNICAL_PERIODS: 指标计算周期
+  - RISK_MODELS: VaR模型参数
+  - PARALLEL_CONFIG: 并行计算配置
+end note
+
+CM --> MAS: CalculationConfig(bs_params, greeks_config, tech_config, risk_config)
+deactivate CM
+
+== 1.1 Black-Scholes引擎初始化 ==
+
+MAS -> GCE: initialize_black_scholes_engine(bs_params)
+activate GCE
+
+GCE -> GCE: setup_bs_calculation_framework()
+note right GCE
+  Black-Scholes引擎配置:
+  - 数学库: 高精度数值计算
+  - 正态分布函数: 累积分布计算
+  - 牛顿迭代法: 隐含波动率求解
+  - 内存池: 减少内存分配开销
+end note
+
+GCE -> GCE: precompute_common_values()
+GCE -> GCE: setup_calculation_cache()
+
+GCE --> MAS: bs_engine_ready(performance_baseline)
+deactivate GCE
+
+== 1.2 Greeks计算引擎初始化 ==
+
+MAS -> GCE: initialize_greeks_calculation_engine()
+activate GCE
+
+GCE -> GCE: setup_derivatives_calculation()
+note right GCE
+  Greeks计算引擎:
+  - 一阶Greeks: Delta, Theta, Vega, Rho
+  - 二阶Greeks: Gamma, Charm, Vanna, Volga
+  - 数值微分: 有限差分法
+  - 解析解: 封闭式公式
+end note
+
+GCE -> GCE: configure_precision_settings()
+GCE -> GCE: setup_parallel_calculation_pools()
+
+GCE --> MAS: greeks_engine_ready
+deactivate GCE
+
+== 1.3 技术指标引擎初始化 ==
+
+MAS -> TAE: initialize_technical_analysis_engine()
+activate TAE
+
+TAE -> TAE: setup_indicator_algorithms()
+note right TAE
+  技术指标引擎:
+  - 移动平均: EMA, SMA, WMA
+  - 动量指标: RSI, MACD, Momentum
+  - 成交量指标: OBV, Volume Profile
+  - 波动率指标: ATR, Bollinger Bands
+end note
+
+TAE -> TAE: configure_calculation_buffers()
+TAE -> TAE: setup_incremental_calculation()
+
+TAE --> MAS: technical_engine_ready
+deactivate TAE
+
+== 1.4 风险计算引擎初始化 ==
+
+MAS -> RCE: initialize_risk_calculation_engine()
+activate RCE
+
+RCE -> RCE: setup_risk_models()
+note right RCE
+  风险计算引擎:
+  - VaR模型: 历史模拟法、蒙特卡洛法
+  - 压力测试: 极端场景模拟
+  - 相关性矩阵: 动态相关性计算
+  - 流动性风险: 市场冲击模型
+end note
+
+RCE -> RCE: initialize_monte_carlo_framework()
+RCE -> RCE: setup_correlation_matrix()
+
+RCE --> MAS: risk_engine_ready
+deactivate RCE
+
+== 2. 实时期权定价计算 ==
+
+MAS -> DAL: get_option_market_data(symbol)
+activate DAL
+
+DAL -> CR: check_cache_for_recent_data(symbol)
+activate CR
+
+alt 缓存命中
+    CR --> DAL: cached_data(option_data, underlying_data)
+else 缓存未命中
+    DAL -> DAL: fetch_fresh_market_data(symbol)
+    DAL -> CR: cache_fresh_data(data, ttl=30s)
+    CR --> DAL: data_cached
+end
+deactivate CR
+
+DAL --> MAS: OptionMarketData(S, K, T, market_price, volume, oi)
+deactivate DAL
+
+== 2.1 Black-Scholes理论价格计算 ==
+
+MAS -> GCE: calculate_theoretical_option_price(S, K, T, r, sigma, option_type)
+activate GCE
+
+GCE -> GCE: validate_input_parameters()
+note right GCE
+  参数验证:
+  - S > 0: 标的价格必须为正
+  - K > 0: 行权价必须为正  
+  - T >= 0: 剩余时间非负
+  - r >= 0: 无风险利率非负
+  - sigma > 0: 波动率必须为正
+end note
+
+GCE -> GCE: calculate_d1_and_d2()
+note right GCE
+  BS公式计算:
+  d1 = (ln(S/K) + (r + σ²/2)T) / (σ√T)
+  d2 = d1 - σ√T
+end note
+
+GCE -> GCE: calculate_normal_cdf(d1, d2)
+GCE -> GCE: apply_bs_formula(call_or_put)
+
+alt Call期权
+    GCE -> GCE: calculate_call_price()
+    note right GCE: C = S·N(d1) - K·e^(-rT)·N(d2)
+else Put期权  
+    GCE -> GCE: calculate_put_price()
+    note right GCE: P = K·e^(-rT)·N(-d2) - S·N(-d1)
+end
+
+GCE -> VU: validate_calculation_result(theoretical_price)
+activate VU
+
+VU -> VU: check_price_reasonableness()
+VU -> VU: compare_with_market_bounds()
+
+VU --> GCE: validation_passed(theoretical_price)
+deactivate VU
+
+GCE --> MAS: BSResult(theoretical_price, calculation_time=5ms)
+deactivate GCE
+
+== 2.2 市场价格与理论价值对比 ==
+
+MAS -> MAS: analyze_price_discrepancy()
+note right MAS
+  价值分析:
+  value_gap = (market_price - theoretical_price) / theoretical_price
+  
+  if value_gap < -0.05:
+      assessment = "UNDERVALUED_5PCT_PLUS"
+  elif value_gap > 0.05:
+      assessment = "OVERVALUED_5PCT_PLUS"  
+  else:
+      assessment = "FAIRLY_VALUED"
+end note
+
+== 3. 实时Greeks计算 ==
+
+MAS -> GCE: calculate_all_greeks(option_data, underlying_price, r, iv)
+activate GCE
+
+par 一阶Greeks并行计算
+    GCE -> GCE: calculate_delta()
+    note right GCE
+      Delta = ∂V/∂S
+      Call: Δ = N(d1)
+      Put: Δ = N(d1) - 1
+    end note
+
+also
+    GCE -> GCE: calculate_theta()
+    note right GCE
+      Theta = ∂V/∂T  
+      考虑时间衰减影响
+    end note
+
+also
+    GCE -> GCE: calculate_vega()
+    note right GCE
+      Vega = ∂V/∂σ
+      对波动率敏感性
+    end note
+
+also
+    GCE -> GCE: calculate_rho()
+    note right GCE
+      Rho = ∂V/∂r
+      对利率敏感性
+    end note
+end
+
+par 二阶Greeks并行计算
+    GCE -> GCE: calculate_gamma()
+    note right GCE
+      Gamma = ∂²V/∂S²
+      Delta变化率
+    end note
+
+also
+    GCE -> GCE: calculate_charm()
+    note right GCE
+      Charm = ∂²V/∂S∂T
+      Delta时间衰减
+    end note
+
+also
+    GCE -> GCE: calculate_vanna()
+    note right GCE
+      Vanna = ∂²V/∂S∂σ
+      Delta对波动率敏感性
+    end note
+
+also
+    GCE -> GCE: calculate_volga()
+    note right GCE
+      Volga = ∂²V/∂σ²
+      Vega变化率
+    end note
+end
+
+GCE -> GCE: aggregate_greeks_results()
+
+GCE -> VU: validate_greeks_accuracy(greeks_data)
+activate VU
+
+VU -> VU: check_greeks_mathematical_consistency()
+VU -> VU: verify_greeks_bounds()
+VU -> VU: cross_validate_calculations()
+
+VU --> GCE: greeks_validation_passed
+deactivate VU
+
+GCE --> MAS: GreeksData(delta, gamma, theta, vega, rho, charm, vanna, volga, timestamp)
+deactivate GCE
+
+== 4. 组合Greeks聚合计算 ==
+
+MAS -> RCE: calculate_portfolio_greeks(positions[])
+activate RCE
+
+RCE -> RCE: initialize_portfolio_aggregation()
+
+loop 每个持仓
+    RCE -> GCE: get_position_greeks(position)
+    activate GCE
+    GCE --> RCE: position_greeks(delta, gamma, theta, vega)
+    deactivate GCE
+    
+    RCE -> RCE: weight_by_position_size(greeks, quantity)
+    RCE -> RCE: accumulate_portfolio_greeks(weighted_greeks)
+end
+
+RCE -> RCE: calculate_portfolio_risk_metrics()
+note right RCE
+  组合风险计算:
+  total_delta = Σ(position_delta_i * quantity_i)
+  total_gamma = Σ(position_gamma_i * quantity_i)
+  total_theta = Σ(position_theta_i * quantity_i)
+  total_vega = Σ(position_vega_i * quantity_i)
+  
+  delta_exposure = total_delta * 100  # 每$1变动影响
+  gamma_risk = total_gamma * 100      # Gamma风险敞口
+  theta_decay_daily = total_theta * 365  # 日时间衰减
+  vega_risk = total_vega * 0.01       # IV变动1%影响
+end note
+
+RCE --> MAS: PortfolioGreeks(aggregated_greeks, risk_metrics, concentration_analysis)
+deactivate RCE
+
+== 5. 技术指标实时计算 ==
+
+MAS -> TAE: calculate_technical_indicators(price_data, volume_data)
+activate TAE
+
+par 并行计算多个指标
+    TAE -> TAE: calculate_ema_indicators()
+    note right TAE
+      EMA计算 (指数移动平均):
+      EMA_today = α × Price_today + (1-α) × EMA_yesterday
+      其中 α = 2/(period + 1)
+    end note
+
+also
+    TAE -> TAE: calculate_momentum_indicators()
+    note right TAE
+      动量指标:
+      Momentum = (Price_today - Price_n_days_ago) / Price_n_days_ago
+      ROC = Rate of Change
+    end note
+
+also
+    TAE -> TAE: calculate_volume_indicators()
+    note right TAE
+      成交量指标:
+      Volume_Ratio = Current_Volume / Average_Volume
+      Large_Trade_Detection = 识别异常大单
+    end note
+end
+
+TAE -> TAE: generate_technical_signals()
+TAE -> TAE: validate_indicator_consistency()
+
+TAE --> MAS: TechnicalIndicators(ema_values, momentum, volume_analysis, signals)
+deactivate TAE
+
+== 6. VaR风险计算 ==
+
+MAS -> RCE: calculate_portfolio_var(positions, confidence_level=0.95)
+activate RCE
+
+RCE -> RCE: select_var_calculation_method()
+
+alt 历史模拟法
+    RCE -> DAL: get_historical_price_data(lookback_period=252)
+    activate DAL
+    DAL --> RCE: historical_data[]
+    deactivate DAL
+    
+    RCE -> RCE: simulate_historical_scenarios()
+    RCE -> RCE: calculate_pnl_distribution()
+
+else 蒙特卡洛模拟法
+    RCE -> RCE: setup_monte_carlo_simulation()
+    RCE -> RCE: generate_random_price_paths(num_simulations=10000)
+    RCE -> RCE: calculate_scenario_pnl()
+
+else 参数化方法
+    RCE -> RCE: estimate_portfolio_volatility()
+    RCE -> RCE: assume_normal_distribution()
+    RCE -> RCE: calculate_parametric_var()
+end
+
+RCE -> RCE: extract_var_percentile(confidence_level)
+
+RCE -> VU: validate_var_calculation(var_result)
+activate VU
+VU --> RCE: var_validation_passed
+deactivate VU
+
+RCE --> MAS: VaRResult(var_95pct, var_99pct, expected_shortfall, calculation_method)
+deactivate RCE
+
+== 7. 计算性能监控和优化 ==
+
+MAS -> MAS: monitor_calculation_performance()
+note right MAS
+  性能监控指标:
+  - 计算延迟: 各引擎响应时间
+  - 吞吐量: 每秒计算次数
+  - 准确性: 计算结果验证
+  - 缓存命中率: 性能优化效果
+end note
+
+alt 性能达标
+    MAS -> CR: update_performance_cache(metrics)
+    activate CR
+    CR --> MAS: cache_updated
+    deactivate CR
+
+else 性能不达标
+    MAS -> MAS: trigger_performance_optimization()
+    
+    par 优化措施
+        MAS -> GCE: optimize_greeks_calculation()
+        activate GCE
+        GCE -> GCE: enable_incremental_updates()
+        GCE -> GCE: optimize_memory_usage()
+        GCE --> MAS: greeks_optimized
+        deactivate GCE
+
+    also
+        MAS -> TAE: optimize_technical_indicators()
+        activate TAE
+        TAE -> TAE: implement_sliding_window_optimization()
+        TAE -> TAE: reduce_redundant_calculations()
+        TAE --> MAS: technical_optimized
+        deactivate TAE
+
+    also
+        MAS -> RCE: optimize_risk_calculations()
+        activate RCE
+        RCE -> RCE: use_parallel_monte_carlo()
+        RCE -> RCE: implement_variance_reduction_techniques()
+        RCE --> MAS: risk_optimized
+        deactivate RCE
+    end
+end
+
+note over MAS, CM
+  **验收标准**:
+  ✓ 计算精度误差<0.1%
+  ✓ 计算性能满足实时要求
+  ✓ 支持并行计算和扩展
+  ✓ 计算结果可验证和审计
+end note
+
+@enduml

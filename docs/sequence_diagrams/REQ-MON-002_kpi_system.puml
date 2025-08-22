@@ -1,0 +1,546 @@
+@startuml REQ-MON-002 性能目标KPI体系流程时序图
+!theme plain
+
+title REQ-MON-002: 性能目标(KPI)体系 - 跨类流程时序图
+
+participant "SystemController" as SC
+participant "DataAccessLayer" as DAL
+participant "OptionTradingService" as OTS
+participant "RiskManagementService" as RMS
+participant "MarketAnalysisService" as MAS
+participant "ValidationUtility" as VU
+participant "ConfigurationManager" as CM
+participant "LoggingUtility" as LU
+
+note over SC, LU
+  **需求**: REQ-MON-002 性能目标(KPI)体系
+  **收益指标**: 年化收益25-40%、夏普>1.5、最大回撤<15%、胜率>45%、盈亏比>2:1
+  **风险指标**: VaR<3%、最大单日亏损<5%、连续亏损<3天、风险调整收益>20%
+  **执行指标**: 延迟<2秒、信号准确率>80%、可用性>99.5%、数据延迟<500ms
+  **要求**: KPI自动计算更新、趋势分析预测、异常告警、报告生成
+end note
+
+== 1. KPI体系初始化 ==
+
+SC -> CM: initialize_kpi_system()
+activate CM
+
+CM -> CM: load_kpi_definitions_and_targets()
+note right CM
+  KPI体系配置:
+  
+  **收益指标目标**:
+  - 年化收益率: 25-40%
+  - 夏普比率: >1.5
+  - 最大回撤: <15%
+  - 策略胜率: >45%
+  - 盈亏比: >2:1
+  
+  **风险指标目标**:
+  - VaR (95%): <3% 日风险
+  - 最大单日亏损: <5%
+  - 连续亏损天数: <3天
+  - 风险调整收益: >20%
+  
+  **执行指标目标**:
+  - 平均成交延迟: <2秒
+  - 信号识别准确率: >80%
+  - 系统可用性: >99.5%
+  - 数据处理延迟: <500ms
+  
+  **计算参数**:
+  - 更新频率: 实时/小时/日/周/月
+  - 历史回望期: 30/90/252个交易日
+  - 基准比较: 无风险利率3.5%
+end note
+
+CM --> SC: KPISystemConfig(targets, calculation_params, alert_thresholds)
+deactivate CM
+
+SC -> DAL: setup_kpi_data_collection()
+activate DAL
+
+DAL -> DAL: initialize_kpi_data_storage()
+note right DAL
+  KPI数据存储结构:
+  - 实时KPI表: 最新指标值
+  - 历史KPI表: 时间序列数据
+  - 基准数据表: 对比参考值
+  - 计算日志表: 计算过程记录
+end note
+
+DAL --> SC: kpi_data_infrastructure_ready
+deactivate DAL
+
+== 2. 实时KPI计算 ==
+
+loop KPI计算周期
+    SC -> SC: trigger_kpi_calculation_cycle()
+    activate SC
+    
+    == 2.1 收益指标计算 ==
+    
+    SC -> OTS: calculate_return_metrics()
+    activate OTS
+    
+    == 2.1.1 年化收益率计算 ==
+    
+    OTS -> DAL: get_portfolio_performance_data(lookback_period)
+    activate DAL
+    DAL --> OTS: portfolio_returns[]
+    deactivate DAL
+    
+    OTS -> OTS: calculate_annualized_return()
+    note right OTS
+      年化收益率计算:
+      total_return = (current_portfolio_value / initial_portfolio_value) - 1
+      trading_days = count_trading_days(start_date, current_date)
+      annualized_return = (1 + total_return) ^ (252 / trading_days) - 1
+      
+      target_min = 0.25  # 25%
+      target_max = 0.40  # 40%
+      performance_score = calculate_target_achievement(annualized_return)
+    end note
+    
+    == 2.1.2 夏普比率计算 ==
+    
+    OTS -> OTS: calculate_sharpe_ratio()
+    note right OTS
+      夏普比率计算:
+      daily_returns = calculate_daily_returns(portfolio_returns)
+      excess_returns = daily_returns - risk_free_rate / 252
+      sharpe_ratio = mean(excess_returns) / std(excess_returns) * sqrt(252)
+      
+      target = 1.5
+      achievement = sharpe_ratio / target if sharpe_ratio > 0 else 0
+    end note
+    
+    == 2.1.3 最大回撤计算 ==
+    
+    OTS -> OTS: calculate_maximum_drawdown()
+    note right OTS
+      最大回撤计算:
+      cumulative_returns = cumulative_product(1 + daily_returns)
+      running_max = cumulative_max(cumulative_returns)
+      drawdowns = (running_max - cumulative_returns) / running_max
+      max_drawdown = max(drawdowns)
+      
+      target = 0.15  # 15%
+      achievement = 1 - (max_drawdown / target) if max_drawdown < target else 0
+    end note
+    
+    == 2.1.4 胜率和盈亏比计算 ==
+    
+    OTS -> DAL: get_completed_trades(period)
+    activate DAL
+    DAL --> OTS: completed_trades[]
+    deactivate DAL
+    
+    OTS -> OTS: calculate_win_rate_and_profit_ratio()
+    note right OTS
+      胜率和盈亏比计算:
+      winning_trades = [t for t in trades if t.pnl > 0]
+      losing_trades = [t for t in trades if t.pnl < 0]
+      
+      win_rate = len(winning_trades) / len(trades)
+      avg_profit = mean([t.pnl for t in winning_trades])
+      avg_loss = abs(mean([t.pnl for t in losing_trades]))
+      profit_loss_ratio = avg_profit / avg_loss
+      
+      win_rate_target = 0.45  # 45%
+      pl_ratio_target = 2.0   # 2:1
+    end note
+    
+    OTS --> SC: ReturnMetrics(annualized_return, sharpe_ratio, max_drawdown, win_rate, pl_ratio)
+    deactivate OTS
+    
+    == 2.2 风险指标计算 ==
+    
+    SC -> RMS: calculate_risk_metrics()
+    activate RMS
+    
+    == 2.2.1 VaR计算 ==
+    
+    RMS -> DAL: get_portfolio_positions_and_prices()
+    activate DAL
+    DAL --> RMS: positions_data, price_history
+    deactivate DAL
+    
+    RMS -> RMS: calculate_portfolio_var()
+    note right RMS
+      VaR计算 (历史模拟法):
+      portfolio_returns = calculate_portfolio_returns(positions, price_history)
+      var_95 = percentile(portfolio_returns, 5)  # 5th percentile
+      var_daily_pct = abs(var_95)
+      
+      target = 0.03  # 3%
+      achievement = 1 - (var_daily_pct / target) if var_daily_pct < target else 0
+    end note
+    
+    == 2.2.2 最大单日亏损计算 ==
+    
+    RMS -> RMS: calculate_max_daily_loss()
+    note right RMS
+      最大单日亏损:
+      daily_pnl = get_daily_pnl_history(lookback_days=30)
+      max_daily_loss_pct = abs(min(daily_pnl)) / portfolio_value
+      
+      target = 0.05  # 5%
+      achievement = 1 - (max_daily_loss_pct / target) if max_daily_loss_pct < target else 0
+    end note
+    
+    == 2.2.3 连续亏损天数计算 ==
+    
+    RMS -> RMS: calculate_consecutive_loss_days()
+    note right RMS
+      连续亏损天数:
+      daily_pnl = get_daily_pnl_history()
+      current_streak = 0
+      max_streak = 0
+      
+      for pnl in reversed(daily_pnl):
+          if pnl < 0:
+              current_streak += 1
+              max_streak = max(max_streak, current_streak)
+          else:
+              current_streak = 0
+      
+      target = 3  # 3天
+      achievement = 1 - (max_streak / target) if max_streak < target else 0
+    end note
+    
+    == 2.2.4 风险调整收益计算 ==
+    
+    RMS -> RMS: calculate_risk_adjusted_return()
+    note right RMS
+      风险调整收益:
+      excess_return = annualized_return - risk_free_rate
+      portfolio_volatility = annualized_volatility(daily_returns)
+      risk_adjusted_return = excess_return / portfolio_volatility
+      
+      target = 0.20  # 20%
+      achievement = risk_adjusted_return / target if risk_adjusted_return > 0 else 0
+    end note
+    
+    RMS --> SC: RiskMetrics(var_95, max_daily_loss, consecutive_loss_days, risk_adjusted_return)
+    deactivate RMS
+    
+    == 2.3 执行指标计算 ==
+    
+    SC -> MAS: calculate_execution_metrics()
+    activate MAS
+    
+    == 2.3.1 平均成交延迟计算 ==
+    
+    MAS -> DAL: get_execution_latency_data(period)
+    activate DAL
+    DAL --> MAS: execution_records[]
+    deactivate DAL
+    
+    MAS -> MAS: calculate_average_execution_latency()
+    note right MAS
+      执行延迟统计:
+      latencies = [r.execution_time - r.signal_time for r in records]
+      avg_latency = mean(latencies)
+      p95_latency = percentile(latencies, 95)
+      
+      target = 2.0  # 2秒
+      achievement = target / avg_latency if avg_latency > 0 else 0
+    end note
+    
+    == 2.3.2 信号识别准确率计算 ==
+    
+    MAS -> DAL: get_signal_prediction_results(period)
+    activate DAL
+    DAL --> MAS: signal_results[]
+    deactivate DAL
+    
+    MAS -> MAS: calculate_signal_accuracy()
+    note right MAS
+      信号准确率:
+      correct_predictions = [s for s in signals if s.predicted == s.actual_outcome]
+      accuracy_rate = len(correct_predictions) / len(signals)
+      
+      target = 0.80  # 80%
+      achievement = accuracy_rate / target if accuracy_rate > 0 else 0
+    end note
+    
+    == 2.3.3 系统可用性计算 ==
+    
+    MAS -> DAL: get_system_uptime_data(period)
+    activate DAL
+    DAL --> MAS: uptime_records[]
+    deactivate DAL
+    
+    MAS -> MAS: calculate_system_availability()
+    note right MAS
+      系统可用性:
+      total_time = end_time - start_time
+      downtime = sum(outage_durations)
+      availability = (total_time - downtime) / total_time
+      
+      target = 0.995  # 99.5%
+      achievement = availability / target if availability > 0 else 0
+    end note
+    
+    == 2.3.4 数据处理延迟计算 ==
+    
+    MAS -> DAL: get_data_processing_latency(period)
+    activate DAL
+    DAL --> MAS: data_latency_records[]
+    deactivate DAL
+    
+    MAS -> MAS: calculate_data_processing_latency()
+    note right MAS
+      数据处理延迟:
+      latencies = [r.processing_time - r.receive_time for r in records]
+      avg_data_latency = mean(latencies)
+      p95_data_latency = percentile(latencies, 95)
+      
+      target = 0.5  # 500ms
+      achievement = target / avg_data_latency if avg_data_latency > 0 else 0
+    end note
+    
+    MAS --> SC: ExecutionMetrics(avg_latency, signal_accuracy, availability, data_latency)
+    deactivate MAS
+    
+    deactivate SC
+end
+
+== 3. KPI综合评估和评分 ==
+
+SC -> VU: evaluate_comprehensive_kpi_performance(return_metrics, risk_metrics, execution_metrics)
+activate VU
+
+VU -> VU: calculate_weighted_kpi_scores()
+note right VU
+  KPI综合评分:
+  
+  收益指标权重 (40%):
+  - 年化收益: 15%
+  - 夏普比率: 10%
+  - 最大回撤: 8%
+  - 胜率: 4%
+  - 盈亏比: 3%
+  
+  风险指标权重 (35%):
+  - VaR: 12%
+  - 最大单日亏损: 10%
+  - 连续亏损天数: 8%
+  - 风险调整收益: 5%
+  
+  执行指标权重 (25%):
+  - 执行延迟: 8%
+  - 信号准确率: 7%
+  - 系统可用性: 6%
+  - 数据延迟: 4%
+  
+  总分 = Σ(指标成就度 × 权重)
+end note
+
+VU -> VU: generate_kpi_performance_rating()
+note right VU
+  KPI绩效评级:
+  total_score = weighted_sum(all_kpi_achievements)
+  
+  performance_rating = {
+      90-100: "EXCELLENT",
+      80-89:  "GOOD", 
+      70-79:  "SATISFACTORY",
+      60-69:  "NEEDS_IMPROVEMENT",
+      <60:    "POOR"
+  }
+end note
+
+VU --> SC: KPIEvaluation(total_score, rating, individual_scores, improvement_areas)
+deactivate VU
+
+== 4. KPI趋势分析和预测 ==
+
+SC -> DAL: perform_kpi_trend_analysis(historical_kpi_data)
+activate DAL
+
+DAL -> DAL: analyze_kpi_historical_trends()
+note right DAL
+  KPI趋势分析:
+  - 移动平均趋势分析
+  - 季节性模式识别
+  - 周期性波动检测
+  - 异常值识别和处理
+  - 相关性分析
+end note
+
+DAL -> DAL: predict_kpi_future_performance()
+note right DAL
+  KPI预测模型:
+  - 线性回归趋势预测
+  - 移动平均预测
+  - 季节性调整预测
+  - 置信区间计算
+  - 目标达成概率评估
+end note
+
+DAL --> SC: KPITrendAnalysis(trends, predictions, confidence_intervals, target_probability)
+deactivate DAL
+
+== 5. KPI异常告警机制 ==
+
+SC -> VU: monitor_kpi_anomalies(current_kpi_values, historical_baselines)
+activate VU
+
+== 5.1 目标偏离告警 ==
+
+VU -> VU: check_target_deviation_alerts()
+note right VU
+  目标偏离检查:
+  
+  严重偏离 (立即告警):
+  - 年化收益 < 15%
+  - 夏普比率 < 1.0
+  - 最大回撤 > 20%
+  - 胜率 < 35%
+  - VaR > 5%
+  
+  中度偏离 (警告):
+  - 指标偏离目标 > 20%
+  - 连续3天未达标
+  - 趋势恶化超过预期
+end note
+
+== 5.2 趋势恶化告警 ==
+
+VU -> VU: check_trend_deterioration_alerts()
+note right VU
+  趋势恶化检查:
+  - KPI连续下降 > 5天
+  - 月度KPI下降 > 15%
+  - 预测目标达成概率 < 60%
+  - 综合评分下降一个等级
+end note
+
+== 5.3 系统性能告警 ==
+
+VU -> VU: check_system_performance_alerts()
+note right VU
+  系统性能告警:
+  - 执行延迟 > 3秒
+  - 信号准确率 < 70%
+  - 系统可用性 < 99%
+  - 数据延迟 > 1秒
+end note
+
+alt 发现KPI异常
+    VU -> LU: generate_kpi_alert(alert_type, severity, affected_kpis, recommendations)
+    activate LU
+    
+    LU -> LU: send_kpi_alert_notifications()
+    note right LU
+      KPI告警通知:
+      - 实时推送到监控面板
+      - 邮件通知相关责任人
+      - 短信通知(严重告警)
+      - 自动触发改进措施建议
+    end note
+    
+    LU --> VU: kpi_alert_sent
+    deactivate LU
+
+else KPI正常
+    VU -> VU: log_normal_kpi_status()
+end
+
+VU --> SC: kpi_anomaly_monitoring_complete
+deactivate VU
+
+== 6. KPI报告自动生成 ==
+
+SC -> LU: generate_kpi_reports(report_type, period)
+activate LU
+
+== 6.1 日报生成 ==
+
+alt 日报请求
+    LU -> LU: generate_daily_kpi_report()
+    note right LU
+      日报内容:
+      - 当日KPI达成情况
+      - 与前日对比分析
+      - 当日交易绩效总结
+      - 风险控制效果评估
+      - 明日改进建议
+    end note
+
+== 6.2 周报生成 ==
+
+else 周报请求
+    LU -> LU: generate_weekly_kpi_report()
+    note right LU
+      周报内容:
+      - 周度KPI趋势分析
+      - 策略效果评估
+      - 风险管理总结
+      - 市场环境影响分析
+      - 下周策略调整建议
+    end note
+
+== 6.3 月报生成 ==
+
+else 月报请求
+    LU -> LU: generate_monthly_kpi_report()
+    note right LU
+      月报内容:
+      - 月度绩效全面评估
+      - 年化指标达成进度
+      - 策略优化效果分析
+      - 市场适应性评价
+      - 季度目标调整建议
+    end note
+end
+
+LU -> LU: format_and_distribute_report()
+note right LU
+  报告分发:
+  - PDF格式报告生成
+  - 自动邮件发送
+  - 系统内报告存档
+  - 关键指标推送
+end note
+
+LU --> SC: kpi_report_generated(report_file, distribution_status)
+deactivate LU
+
+== 7. KPI体系持续优化 ==
+
+SC -> CM: optimize_kpi_system(performance_feedback, market_conditions)
+activate CM
+
+CM -> CM: review_kpi_targets_appropriateness()
+note right CM
+  KPI目标优化:
+  - 基于历史达成率调整目标
+  - 考虑市场环境变化
+  - 参考行业基准对比
+  - 平衡挑战性和可达性
+end note
+
+CM -> CM: update_kpi_calculation_methodology()
+note right CM
+  计算方法优化:
+  - 改进统计方法
+  - 增加新的衡量维度
+  - 优化权重分配
+  - 增强预测模型
+end note
+
+CM --> SC: optimized_kpi_system_config(updated_targets, improved_calculations)
+deactivate CM
+
+note over SC, LU
+  **验收标准**:
+  ✓ KPI自动计算和更新
+  ✓ KPI趋势分析和预测
+  ✓ KPI异常告警机制
+  ✓ KPI报告自动生成
+end note
+
+@enduml

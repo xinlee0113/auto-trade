@@ -1,0 +1,206 @@
+@startuml REQ-OPT-001 期权筛选标准流程时序图
+!theme plain
+
+title REQ-OPT-001: 期权筛选标准 - 跨类流程时序图
+
+participant "OptionTradingService" as OTS
+participant "DataAccessLayer" as DAL
+participant "GreeksCalculationEngine" as GCE
+participant "ValidationUtility" as VU
+participant "ExternalAPIAdapter" as EAA
+participant "ConfigurationManager" as CM
+
+note over OTS, CM
+  **需求**: REQ-OPT-001 期权筛选标准
+  **主选条件**: Greeks筛选 + 流动性筛选
+  **评分系统**: 流动性40分 + Greeks30分 + 时间价值20分 + 波动率10分
+  **目标**: 筛选出最优的0DTE期权进行交易
+end note
+
+== 1. 筛选流程初始化 ==
+
+OTS -> CM: get_option_screening_config()
+activate CM
+CM --> OTS: ScreeningConfig(greeks_criteria, liquidity_criteria, scoring_weights)
+deactivate CM
+
+OTS -> DAL: get_dte_option_chain(symbol)
+activate DAL
+
+DAL -> EAA: fetch_option_chain(symbol, expiry=today)
+activate EAA
+EAA --> DAL: raw_option_data[]
+deactivate EAA
+
+DAL --> OTS: option_chain_data[]
+deactivate DAL
+
+== 2. 主选条件筛选 ==
+
+loop 每个期权合约
+    OTS -> GCE: calculate_option_greeks(option)
+    activate GCE
+    
+    GCE -> GCE: calculate_all_greeks(S, K, T, r, sigma)
+    note right GCE
+      Greeks计算:
+      - Delta = ∂V/∂S
+      - Gamma = ∂²V/∂S²  
+      - Theta = ∂V/∂T
+      - Vega = ∂V/∂σ
+    end note
+    
+    GCE --> OTS: GreeksData(delta, gamma, theta, vega)
+    deactivate GCE
+    
+    == 2.1 Greeks筛选矩阵 ==
+    
+    OTS -> VU: validate_greeks_criteria(greeks, option)
+    activate VU
+    
+    VU -> VU: check_delta_range(0.25 <= |delta| <= 0.75)
+    VU -> VU: check_gamma_threshold(gamma > 0.015)
+    VU -> VU: check_theta_acceptable(|theta| < option_price * 0.1)
+    VU -> VU: check_vega_sensitivity(vega > 0.05)
+    
+    alt 所有Greeks条件满足
+        VU --> OTS: greeks_passed(option)
+    else 任一条件不满足
+        VU --> OTS: greeks_failed(option, failed_criteria)
+        OTS -> OTS: exclude_option(option)
+        note right OTS: 跳过此期权
+        deactivate VU
+        break
+    end
+    deactivate VU
+    
+    == 2.2 流动性筛选 ==
+    
+    OTS -> VU: validate_liquidity_criteria(option)
+    activate VU
+    
+    VU -> VU: check_volume_threshold(volume_1h >= 50)
+    VU -> VU: check_open_interest(open_interest >= 100)
+    VU -> VU: check_avg_trade_size(avg_trade_size >= 3)
+    VU -> VU: check_quote_spread((ask-bid) <= max(0.03, bid*0.03))
+    
+    alt 所有流动性条件满足
+        VU --> OTS: liquidity_passed(option)
+        OTS -> OTS: add_to_candidates(option)
+    else 任一条件不满足
+        VU --> OTS: liquidity_failed(option, failed_criteria)
+        OTS -> OTS: exclude_option(option)
+    end
+    deactivate VU
+end
+
+== 3. 候选期权评分系统 ==
+
+OTS -> OTS: score_candidate_options(candidates[])
+
+loop 每个候选期权
+    == 3.1 流动性评分 (40分) ==
+    
+    OTS -> OTS: calculate_liquidity_score(option)
+    note right OTS
+      volume_score = min(20, option.volume_ratio * 20)
+      spread_score = min(20, (1 - option.spread_ratio) * 20)
+      liquidity_score = volume_score + spread_score
+    end note
+    
+    == 3.2 Greeks评分 (30分) ==
+    
+    OTS -> OTS: calculate_greeks_score(option)
+    note right OTS
+      gamma_score = min(15, option.gamma * 1000)
+      delta_score = 15 * (1 - abs(abs(option.delta) - 0.5) * 2)
+      greeks_score = gamma_score + delta_score
+    end note
+    
+    == 3.3 时间价值评分 (20分) ==
+    
+    OTS -> OTS: calculate_time_value_score(option)
+    note right OTS
+      time_value_ratio = option.time_value / option.price
+      time_value_score = min(20, time_value_ratio * 100)
+    end note
+    
+    == 3.4 波动率评分 (10分) ==
+    
+    OTS -> GCE: get_iv_percentile(option)
+    activate GCE
+    GCE --> OTS: iv_percentile_30d
+    deactivate GCE
+    
+    OTS -> OTS: calculate_iv_score(iv_percentile)
+    note right OTS
+      # 偏好低IV环境
+      iv_score = min(10, (1 - iv_percentile) * 10)
+    end note
+    
+    == 3.5 综合评分 ==
+    
+    OTS -> OTS: calculate_total_score(option)
+    note right OTS
+      total_score = (
+        liquidity_score +    # 40分
+        greeks_score +       # 30分  
+        time_value_score +   # 20分
+        iv_score            # 10分
+      )
+      
+      option.final_score = total_score
+    end note
+end
+
+== 4. 最优期权选择 ==
+
+OTS -> OTS: rank_options_by_score(candidates)
+OTS -> OTS: select_top_options(top_n=3)
+
+OTS -> VU: final_validation(selected_options)
+activate VU
+
+VU -> VU: cross_validation_check()
+VU -> VU: portfolio_correlation_check()
+VU -> VU: risk_concentration_check()
+
+VU --> OTS: validation_results(approved_options, warnings)
+deactivate VU
+
+== 5. 筛选结果输出 ==
+
+alt 有合格期权
+    OTS -> OTS: prepare_option_recommendations()
+    note right OTS
+      recommendation = {
+        'selected_options': approved_options,
+        'scores_breakdown': {...},
+        'selection_rationale': "...",
+        'risk_assessment': {...},
+        'timestamp': now()
+      }
+    end note
+    
+else 无合格期权
+    OTS -> OTS: log_no_suitable_options()
+    note right OTS
+      log_data = {
+        'symbol': symbol,
+        'total_options_reviewed': len(option_chain),
+        'greeks_failures': greeks_failure_count,
+        'liquidity_failures': liquidity_failure_count,
+        'timestamp': now()
+      }
+    end note
+end
+
+note over OTS, CM
+  **验收标准**:
+  ✓ 筛选算法执行时间<1秒
+  ✓ 评分结果可重现、可解释
+  ✓ 支持评分权重参数配置
+  ✓ 筛选结果实时更新
+end note
+
+@enduml

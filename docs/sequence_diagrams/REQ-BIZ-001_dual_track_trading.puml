@@ -1,0 +1,166 @@
+@startuml REQ-BIZ-001 双轨制交易系统流程时序图
+!theme plain
+
+title REQ-BIZ-001: 双轨制交易系统 - 跨类流程时序图
+
+actor User as U
+participant "MainApplication" as MA
+participant "TradingOrchestrator" as TO
+participant "MarketAnalysisService" as MAS
+participant "OptionTradingService" as OTS
+participant "RiskManagementService" as RMS
+participant "DataAccessLayer" as DAL
+participant "ConfigurationManager" as CM
+
+note over U, CM
+  **需求**: REQ-BIZ-001 双轨制交易系统
+  **常规轨道**: 80%资金分配，稳定收益
+  **异动轨道**: 20%资金分配，爆发收益
+  **关键机制**: 异动时暂停常规轨道，结束后恢复
+end note
+
+== 1. 系统初始化 ==
+
+U -> MA: start_trading()
+activate MA
+
+MA -> TO: orchestrate_trading_workflow()
+activate TO
+
+TO -> CM: get_trading_config()
+activate CM
+CM --> TO: config(regular_ratio=0.8, anomaly_ratio=0.2)
+deactivate CM
+
+TO -> RMS: initialize_dual_track_limits()
+activate RMS
+RMS --> TO: limits_configured
+deactivate RMS
+
+== 2. 双轨道并行启动 ==
+
+par 常规交易轨道 (80%资金)
+    TO -> MAS: start_regular_analysis()
+    activate MAS
+    
+    MAS -> DAL: subscribe_market_data(symbols)
+    activate DAL
+    DAL --> MAS: real_time_stream
+    deactivate DAL
+    
+    loop 常规监控
+        MAS -> MAS: analyze_market_conditions()
+        MAS --> TO: regular_signal(strength, confidence)
+        
+        TO -> RMS: check_regular_limits(signal)
+        activate RMS
+        RMS --> TO: approval_status
+        deactivate RMS
+        
+        alt 信号通过
+            TO -> OTS: execute_regular_trade(signal, 80%_fund)
+            activate OTS
+            OTS --> TO: position_created
+            deactivate OTS
+        end
+    end
+    deactivate MAS
+
+else 异动交易轨道 (20%资金)
+    TO -> MAS: start_anomaly_detection()
+    activate MAS
+    
+    loop 异动监控
+        MAS -> MAS: detect_market_anomaly()
+        
+        alt 检测到异动
+            MAS --> TO: anomaly_signal(level, urgency)
+            
+            note over TO
+              **轨道协调机制触发**:
+              1. 暂停常规轨道新开仓
+              2. 加强现有持仓监控  
+              3. 启动异动轨道交易
+            end note
+            
+            TO -> OTS: pause_regular_track()
+            activate OTS
+            OTS --> TO: regular_paused
+            deactivate OTS
+            
+            TO -> RMS: check_anomaly_limits(signal)
+            activate RMS
+            RMS --> TO: anomaly_approval
+            deactivate RMS
+            
+            TO -> OTS: execute_anomaly_trade(signal, 20%_fund)
+            activate OTS
+            OTS --> TO: anomaly_position_created
+            deactivate OTS
+            
+        else 异动结束
+            MAS --> TO: anomaly_ended
+            
+            TO -> OTS: resume_regular_track()
+            activate OTS
+            OTS --> TO: regular_resumed
+            deactivate OTS
+        end
+    end
+    deactivate MAS
+end
+
+== 3. 持续风险监控 ==
+
+loop 实时监控
+    TO -> RMS: monitor_dual_track_risk()
+    activate RMS
+    
+    RMS -> RMS: calculate_combined_exposure()
+    RMS -> RMS: assess_track_balance()
+    
+    alt 风险超限
+        RMS --> TO: risk_alert(track, action)
+        
+        TO -> OTS: execute_risk_action(track, action)
+        activate OTS
+        OTS --> TO: risk_action_completed
+        deactivate OTS
+        
+    else 资金再平衡需要
+        RMS --> TO: rebalance_required(new_ratios)
+        
+        TO -> OTS: rebalance_tracks(new_ratios)
+        activate OTS
+        OTS --> TO: tracks_rebalanced
+        deactivate OTS
+    end
+    deactivate RMS
+end
+
+== 4. 系统关闭 ==
+
+U -> MA: shutdown_system()
+
+TO -> OTS: close_all_tracks()
+activate OTS
+OTS -> OTS: close_regular_positions()
+OTS -> OTS: close_anomaly_positions()
+OTS --> TO: all_tracks_closed
+deactivate OTS
+
+TO --> MA: dual_track_system_stopped
+deactivate TO
+
+MA --> U: system_shutdown_complete
+deactivate MA
+
+note over U, CM
+  **验收标准**:
+  ✓ 双轨道独立运行且资金分配80%/20%
+  ✓ 异动检测自动暂停常规轨道
+  ✓ 异动结束自动恢复常规轨道
+  ✓ 实时风险监控和资金再平衡
+end note
+
+@enduml

@@ -1,0 +1,435 @@
+@startuml 0DTE期权高频交易系统类图
+!theme plain
+
+title 0DTE期权高频交易系统 - 严格分层类图设计
+
+' ===== 表示层 =====
+package "表示层 (Presentation Layer)" {
+    class MainApplication {
+        - orchestrator: TradingOrchestrator
+        - controller: SystemController
+        - logger: Logger
+        
+        + main()
+        + initialize_system()
+        + start_trading()
+        + shutdown_system()
+    }
+    
+    class CommandLineInterface {
+        - argument_parser: ArgumentParser
+        - config_loader: ConfigurationManager
+        
+        + parse_arguments()
+        + load_configuration()
+        + display_help()
+        + validate_inputs()
+    }
+}
+
+' ===== 应用服务层 =====
+package "应用服务层 (Application Service Layer)" {
+    class TradingOrchestrator {
+        - market_service: MarketAnalysisService
+        - option_service: OptionTradingService
+        - risk_service: RiskManagementService
+        - logger: Logger
+        
+        + orchestrate_trading_workflow()
+        + coordinate_services()
+        + handle_business_exceptions()
+        + monitor_system_health()
+    }
+    
+    class SystemController {
+        - system_state: SystemState
+        - health_monitor: HealthMonitor
+        - logger: Logger
+        
+        + start_system()
+        + stop_system()
+        + pause_system()
+        + resume_system()
+        + get_system_status()
+    }
+}
+
+' ===== 领域服务层 =====
+package "领域服务层 (Domain Service Layer)" {
+    class MarketAnalysisService {
+        - data_access: DataAccessLayer
+        - technical_engine: TechnicalAnalysisEngine
+        - config: ConfigurationManager
+        - logger: Logger
+        
+        + analyze_market_conditions()
+        + detect_trading_opportunities()
+        + generate_market_signals()
+        + assess_market_volatility()
+    }
+    
+    class OptionTradingService {
+        - data_access: DataAccessLayer
+        - greeks_engine: GreeksCalculationEngine
+        - api_adapter: ExternalAPIAdapter
+        - config: ConfigurationManager
+        - logger: Logger
+        
+        + select_optimal_options()
+        + calculate_option_strategies()
+        + execute_option_trades()
+        + monitor_positions()
+    }
+    
+    class RiskManagementService {
+        - data_access: DataAccessLayer
+        - risk_engine: RiskCalculationEngine
+        - config: ConfigurationManager
+        - logger: Logger
+        
+        + assess_portfolio_risk()
+        + enforce_risk_limits()
+        + generate_risk_alerts()
+        + calculate_var()
+    }
+}
+
+' ===== 基础设施层 =====
+package "基础设施层 (Infrastructure Layer)" {
+    class DataAccessLayer {
+        - cache_repo: CacheRepository
+        - api_adapter: ExternalAPIAdapter
+        - validator: ValidationUtility
+        - logger: Logger
+        
+        + get_real_time_data()
+        + get_historical_data()
+        + persist_data()
+        + validate_data_integrity()
+    }
+    
+    class ExternalAPIAdapter {
+        - tiger_client: TigerClient
+        - rate_limiter: APIRateLimiter
+        - retry_handler: RetryHandler
+        - logger: Logger
+        
+        + get_market_data()
+        + get_option_chain()
+        + place_orders()
+        + handle_api_errors()
+    }
+    
+    class CacheRepository {
+        - memory_cache: MemoryCache
+        - cache_strategy: CacheStrategy
+        - ttl_manager: TTLManager
+        - logger: Logger
+        
+        + set_cache()
+        + get_cache()
+        + invalidate_cache()
+        + cleanup_expired()
+    }
+}
+
+' ===== 计算引擎层 =====
+package "计算引擎层 (Calculation Engine Layer)" {
+    class GreeksCalculationEngine {
+        - model_params: ModelParameters
+        - calculator: BlackScholesCalculator
+        - logger: Logger
+        
+        + calculate_all_greeks()
+        + calculate_delta()
+        + calculate_gamma()
+        + calculate_theta()
+        + calculate_vega()
+        + calculate_implied_volatility()
+    }
+    
+    class TechnicalAnalysisEngine {
+        - indicators_config: IndicatorsConfig
+        - signal_generator: SignalGenerator
+        - logger: Logger
+        
+        + calculate_technical_indicators()
+        + generate_trading_signals()
+        + analyze_trends()
+        + detect_patterns()
+    }
+    
+    class RiskCalculationEngine {
+        - risk_models: RiskModels
+        - monte_carlo: MonteCarloEngine
+        - logger: Logger
+        
+        + calculate_var()
+        + perform_stress_test()
+        + calculate_portfolio_risk()
+        + assess_concentration_risk()
+    }
+}
+
+' ===== 数据模型层 =====
+package "数据模型层 (Data Model Layer)" {
+    class MarketData {
+        + symbol: str
+        + timestamp: datetime
+        + price: float
+        + volume: int
+        + bid: float
+        + ask: float
+        + bid_size: int
+        + ask_size: int
+        + ma_short: Optional[float]
+        + ma_long: Optional[float]
+        + rsi: Optional[float]
+        + macd: Optional[float]
+        + __post_init__()
+    }
+    
+    class OptionTickData {
+        + symbol: str
+        + underlying_symbol: str
+        + strike: float
+        + option_type: str
+        + expiry_date: str
+        + price: float
+        + bid: float
+        + ask: float
+        + volume: int
+        + open_interest: int
+        + delta: float
+        + gamma: float
+        + theta: float
+        + vega: float
+        + implied_volatility: float
+        + timestamp: datetime
+        + unique_symbol: str
+        + bid_ask_spread: float
+        + __post_init__()
+    }
+    
+    class UnderlyingTickData {
+        + symbol: str
+        + price: float
+        + bid: float
+        + ask: float
+        + bid_size: int
+        + ask_size: int
+        + volume: int
+        + timestamp: datetime
+        + change_percent: float
+        + __post_init__()
+    }
+    
+    class Position {
+        + position_id: str
+        + symbol: str
+        + position_type: str
+        + quantity: int
+        + entry_price: float
+        + current_price: float
+        + market_value: float
+        + unrealized_pnl: float
+        + delta: float
+        + gamma: float
+        + theta: float
+        + vega: float
+        + bid_ask_spread: Optional[float]
+        + underlying: str
+        + timestamp: datetime
+        + __post_init__()
+    }
+    
+    class RiskMetrics {
+        + total_value: float
+        + portfolio_delta: float
+        + portfolio_gamma: float
+        + portfolio_theta: float
+        + portfolio_vega: float
+        + value_at_risk: float
+        + max_single_position_loss: float
+        + concentration_risk: float
+        + liquidity_risk: float
+        + timestamp: datetime
+    }
+    
+    class TradingSignal {
+        + signal_type: SignalType
+        + symbol: str
+        + strength: float
+        + confidence: float
+        + timestamp: datetime
+        + metadata: Dict<str, Any>
+    }
+    
+    class GreeksData {
+        + delta: float
+        + gamma: float
+        + theta: float
+        + vega: float
+        + rho: float
+        + charm: float
+        + vanna: float
+        + volga: float
+        + timestamp: datetime
+    }
+}
+
+' ===== 配置层 =====
+package "配置层 (Configuration Layer)" {
+    class ConfigurationManager {
+        - config_data: ConfigData
+        - validation_rules: ValidationRules
+        
+        + load_configuration()
+        + get_trading_config()
+        + get_risk_config()
+        + validate_config()
+    }
+    
+    class ConstantsDefinition {
+        + TRADING_CONSTANTS
+        + RISK_THRESHOLDS
+        + API_LIMITS
+        + CALCULATION_PARAMS
+    }
+}
+
+' ===== 工具层 =====
+package "工具层 (Utility Layer)" {
+    class LoggingUtility {
+        - log_config: LogConfig
+        - formatters: Formatters
+        
+        + get_logger()
+        + setup_logging()
+        + log_performance()
+        + log_errors()
+    }
+    
+    class ValidationUtility {
+        - validation_rules: ValidationRules
+        - schema_validator: SchemaValidator
+        
+        + validate_market_data()
+        + validate_trading_params()
+        + validate_risk_limits()
+        + check_business_rules()
+    }
+    
+    class SecurityUtility {
+        - encryption_key: EncryptionKey
+        - auth_provider: AuthProvider
+        
+        + encrypt_data()
+        + decrypt_data()
+        + authenticate_user()
+        + authorize_operation()
+    }
+}
+
+' ===== 严格分层依赖关系 =====
+
+' 表示层依赖应用服务层
+MainApplication --> TradingOrchestrator : 依赖
+MainApplication --> SystemController : 依赖
+CommandLineInterface --> ConfigurationManager : 依赖
+
+' 应用服务层依赖领域服务层
+TradingOrchestrator --> MarketAnalysisService : 依赖
+TradingOrchestrator --> OptionTradingService : 依赖
+TradingOrchestrator --> RiskManagementService : 依赖
+
+' 领域服务层依赖基础设施层和计算引擎层
+MarketAnalysisService --> DataAccessLayer : 依赖
+MarketAnalysisService --> TechnicalAnalysisEngine : 依赖
+
+OptionTradingService --> DataAccessLayer : 依赖
+OptionTradingService --> GreeksCalculationEngine : 依赖
+OptionTradingService --> ExternalAPIAdapter : 依赖
+
+RiskManagementService --> DataAccessLayer : 依赖
+RiskManagementService --> RiskCalculationEngine : 依赖
+
+' 基础设施层依赖数据模型层
+DataAccessLayer --> DomainModels : 依赖
+DataAccessLayer --> ValueObjects : 依赖
+ExternalAPIAdapter --> DomainModels : 依赖
+CacheRepository --> ValueObjects : 依赖
+
+' 计算引擎层依赖数据模型层
+GreeksCalculationEngine --> GreeksData : 依赖
+GreeksCalculationEngine --> OptionTickData : 依赖
+TechnicalAnalysisEngine --> TradingSignal : 依赖
+TechnicalAnalysisEngine --> MarketData : 依赖
+RiskCalculationEngine --> RiskMetrics : 依赖
+RiskCalculationEngine --> Position : 依赖
+
+' 横向支持 - 配置注入
+ConfigurationManager -.-> MarketAnalysisService : 配置注入
+ConfigurationManager -.-> OptionTradingService : 配置注入
+ConfigurationManager -.-> RiskManagementService : 配置注入
+
+' 横向支持 - 工具支持
+LoggingUtility -.-> MarketAnalysisService : 日志支持
+LoggingUtility -.-> OptionTradingService : 日志支持
+LoggingUtility -.-> RiskManagementService : 日志支持
+LoggingUtility -.-> DataAccessLayer : 日志支持
+
+ValidationUtility -.-> DataAccessLayer : 验证支持
+ValidationUtility -.-> ExternalAPIAdapter : 验证支持
+
+SecurityUtility -.-> ExternalAPIAdapter : 安全支持
+
+note top of MainApplication
+  **职责**: 系统启动入口、用户交互
+  **依赖**: 仅依赖应用服务层
+  **原则**: 薄层设计，无业务逻辑
+end note
+
+note top of TradingOrchestrator
+  **职责**: 业务流程编排、服务协调
+  **依赖**: 仅依赖领域服务层
+  **原则**: 无状态、事务管理
+end note
+
+note top of MarketAnalysisService
+  **职责**: 市场分析核心业务逻辑
+  **依赖**: 基础设施层、计算引擎层
+  **原则**: 领域完整性、高内聚
+end note
+
+note top of DataAccessLayer
+  **职责**: 数据访问抽象、技术实现
+  **依赖**: 仅依赖数据模型层
+  **原则**: 接口抽象、技术细节封装
+end note
+
+note top of GreeksCalculationEngine
+  **职责**: 期权Greeks数学计算
+  **依赖**: 仅依赖数据模型层
+  **原则**: 纯函数、无副作用、高性能
+end note
+
+note bottom of DomainModels
+  **职责**: 领域实体、业务概念建模
+  **依赖**: 无外部依赖（最底层）
+  **原则**: 不可变性、类型安全、领域表达
+end note
+
+note right of ConfigurationManager
+  **特点**: 横向配置支持
+  **职责**: 参数注入、配置管理
+  **原则**: 配置驱动、环境分离
+end note
+
+note right of LoggingUtility
+  **特点**: 横向工具支持
+  **职责**: 日志记录、性能监控
+  **原则**: 无状态、可插拔
+end note
+
+@enduml

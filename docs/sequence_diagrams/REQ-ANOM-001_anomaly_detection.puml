@@ -1,0 +1,405 @@
+@startuml REQ-ANOM-001 三级异动分类系统流程时序图
+!theme plain
+
+title REQ-ANOM-001: 三级异动分类系统 - 跨类流程时序图
+
+participant "MarketAnalysisService" as MAS
+participant "DataAccessLayer" as DAL
+participant "TechnicalAnalysisEngine" as TAE
+participant "ExternalAPIAdapter" as EAA
+participant "CacheRepository" as CR
+participant "ValidationUtility" as VU
+participant "ConfigurationManager" as CM
+participant "TradingOrchestrator" as TO
+
+note over MAS, TO
+  **需求**: REQ-ANOM-001 三级异动分类系统
+  **Level 1**: VIX涨3-5%、成交量2-3倍、价格波动0.3-0.5% (谨慎参与)
+  **Level 2**: VIX涨5-10%、成交量3-5倍、价格波动0.5-1% (积极参与)
+  **Level 3**: VIX涨10%+、成交量5倍+、价格波动1%+ (全力参与或完全规避)
+  **检测延迟**: <10秒、分类准确率>85%
+end note
+
+== 1. 异动检测系统初始化 ==
+
+MAS -> CM: initialize_anomaly_detection_system()
+activate CM
+
+CM -> CM: load_anomaly_detection_config()
+note right CM
+  异动检测配置参数:
+  
+  **Level 1 阈值 (轻度异动)**:
+  - VIX_CHANGE_L1: 3-5% (30秒内)
+  - VOLUME_RATIO_L1: 2-3倍放大
+  - PRICE_VOLATILITY_L1: 0.3-0.5%
+  - STRATEGY: 谨慎参与，小仓位测试
+  
+  **Level 2 阈值 (中度异动)**:
+  - VIX_CHANGE_L2: 5-10% (30秒内)
+  - VOLUME_RATIO_L2: 3-5倍放大
+  - PRICE_VOLATILITY_L2: 0.5-1%
+  - STRATEGY: 积极参与，标准仓位
+  
+  **Level 3 阈值 (重度异动)**:
+  - VIX_CHANGE_L3: 10%+ (30秒内)
+  - VOLUME_RATIO_L3: 5倍以上放大
+  - PRICE_VOLATILITY_L3: 1%以上
+  - STRATEGY: 全力参与或完全规避
+  
+  **检测参数**:
+  - 检测窗口: 30秒滑动窗口
+  - 更新频率: 每秒检测
+  - 历史基准: 5分钟移动平均
+end note
+
+CM --> MAS: AnomalyDetectionConfig(level_thresholds, detection_params, strategies)
+deactivate CM
+
+MAS -> DAL: setup_anomaly_data_sources()
+activate DAL
+
+DAL -> EAA: subscribe_vix_data_feed()
+activate EAA
+EAA --> DAL: vix_subscription_active
+deactivate EAA
+
+DAL -> EAA: subscribe_volume_data_feed()
+activate EAA
+EAA --> DAL: volume_subscription_active
+deactivate EAA
+
+DAL -> EAA: subscribe_price_data_feed()
+activate EAA
+EAA --> DAL: price_subscription_active
+deactivate EAA
+
+DAL --> MAS: anomaly_data_sources_ready
+deactivate DAL
+
+== 2. 实时异动监控循环 ==
+
+loop 每秒异动检测
+    MAS -> DAL: collect_anomaly_indicators()
+    activate DAL
+    
+    == 2.1 VIX变化检测 ==
+    
+    DAL -> EAA: get_current_vix_value()
+    activate EAA
+    EAA --> DAL: current_vix(value, timestamp)
+    deactivate EAA
+    
+    DAL -> CR: get_vix_30s_history()
+    activate CR
+    CR --> DAL: vix_history_30s[]
+    deactivate CR
+    
+    DAL -> DAL: calculate_vix_change_30s()
+    note right DAL
+      VIX变化计算:
+      vix_30s_ago = vix_history_30s[0]
+      vix_change_pct = (current_vix - vix_30s_ago) / vix_30s_ago
+      vix_change_direction = "UP" if vix_change_pct > 0 else "DOWN"
+    end note
+    
+    == 2.2 成交量放大检测 ==
+    
+    DAL -> TAE: get_volume_indicators(symbols_list)
+    activate TAE
+    
+    TAE -> TAE: calculate_volume_ratios()
+    note right TAE
+      成交量比率计算:
+      for symbol in symbols:
+          current_volume_30s = sum(volume_last_30s)
+          avg_volume_5min = mean(volume_last_5min)
+          volume_ratio = current_volume_30s / avg_volume_5min
+          volume_surge = volume_ratio >= 2.0
+    end note
+    
+    TAE --> DAL: VolumeIndicators(ratios, surges, max_ratio)
+    deactivate TAE
+    
+    == 2.3 价格波动检测 ==
+    
+    DAL -> TAE: get_price_volatility_indicators(symbols_list)
+    activate TAE
+    
+    TAE -> TAE: calculate_price_volatility_30s()
+    note right TAE
+      价格波动计算:
+      for symbol in symbols:
+          price_30s_ago = price_history_30s[0]
+          price_change_pct = abs(current_price - price_30s_ago) / price_30s_ago
+          volatility_spike = price_change_pct >= 0.003  # 0.3%
+    end note
+    
+    TAE --> DAL: PriceVolatilityIndicators(volatilities, spikes, max_volatility)
+    deactivate TAE
+    
+    DAL --> MAS: AnomalyIndicators(vix_change, volume_surge, price_volatility)
+    deactivate DAL
+    
+    == 3. 异动级别分类判断 ==
+    
+    MAS -> MAS: classify_anomaly_level(indicators)
+    
+    == 3.1 Level 3 重度异动检测 ==
+    
+    MAS -> MAS: check_level3_conditions(indicators)
+    note right MAS
+      Level 3 重度异动条件:
+      vix_condition = vix_change_pct >= 0.10  # 10%+
+      volume_condition = max_volume_ratio >= 5.0  # 5倍+
+      price_condition = max_price_volatility >= 0.01  # 1%+
+      
+      level3_triggered = (
+          vix_condition and volume_condition and price_condition
+      )
+    end note
+    
+    alt Level 3 异动检测到
+        MAS -> VU: validate_level3_anomaly(indicators)
+        activate VU
+        
+        VU -> VU: cross_validate_anomaly_signals()
+        note right VU
+          Level 3 异动验证:
+          - 多数据源交叉验证
+          - 排除数据错误和异常值
+          - 确认异动持续性(>5秒)
+          - 验证市场广度影响
+        end note
+        
+        alt Level 3 验证通过
+            VU --> MAS: level3_anomaly_confirmed(confidence=95%+)
+            deactivate VU
+            
+            MAS -> MAS: generate_level3_anomaly_alert()
+            note right MAS
+              Level 3 异动响应:
+              anomaly_event = {
+                  'level': 3,
+                  'severity': 'CRITICAL',
+                  'strategy': 'FULL_ENGAGEMENT_OR_COMPLETE_AVOIDANCE',
+                  'vix_change': vix_change_pct,
+                  'volume_max_ratio': max_volume_ratio,
+                  'price_max_volatility': max_price_volatility,
+                  'confidence': confidence_score,
+                  'timestamp': current_timestamp
+              }
+            end note
+            
+            MAS -> TO: notify_level3_anomaly(anomaly_event)
+            activate TO
+            TO -> TO: execute_level3_response_strategy()
+            TO --> MAS: level3_response_initiated
+            deactivate TO
+            
+        else Level 3 验证失败
+            VU --> MAS: level3_anomaly_rejected(reason)
+            deactivate VU
+            note right MAS: 继续检测其他级别
+        end
+        
+    else 检查 Level 2 异动
+        == 3.2 Level 2 中度异动检测 ==
+        
+        MAS -> MAS: check_level2_conditions(indicators)
+        note right MAS
+          Level 2 中度异动条件:
+          vix_condition = 0.05 <= vix_change_pct < 0.10  # 5-10%
+          volume_condition = 3.0 <= max_volume_ratio < 5.0  # 3-5倍
+          price_condition = 0.005 <= max_price_volatility < 0.01  # 0.5-1%
+          
+          level2_triggered = (
+              vix_condition and volume_condition and price_condition
+          )
+        end note
+        
+        alt Level 2 异动检测到
+            MAS -> VU: validate_level2_anomaly(indicators)
+            activate VU
+            VU -> VU: validate_level2_criteria()
+            
+            alt Level 2 验证通过
+                VU --> MAS: level2_anomaly_confirmed(confidence=85%+)
+                deactivate VU
+                
+                MAS -> MAS: generate_level2_anomaly_alert()
+                note right MAS
+                  Level 2 异动响应:
+                  anomaly_event = {
+                      'level': 2,
+                      'severity': 'HIGH',
+                      'strategy': 'AGGRESSIVE_PARTICIPATION',
+                      'recommended_position': 'STANDARD_SIZE',
+                      'confidence': confidence_score
+                  }
+                end note
+                
+                MAS -> TO: notify_level2_anomaly(anomaly_event)
+                activate TO
+                TO -> TO: execute_level2_response_strategy()
+                TO --> MAS: level2_response_initiated
+                deactivate TO
+                
+            else Level 2 验证失败
+                VU --> MAS: level2_anomaly_rejected(reason)
+                deactivate VU
+                note right MAS: 继续检测Level 1
+            end
+            
+        else 检查 Level 1 异动
+            == 3.3 Level 1 轻度异动检测 ==
+            
+            MAS -> MAS: check_level1_conditions(indicators)
+            note right MAS
+              Level 1 轻度异动条件:
+              vix_condition = 0.03 <= vix_change_pct < 0.05  # 3-5%
+              volume_condition = 2.0 <= max_volume_ratio < 3.0  # 2-3倍
+              price_condition = 0.003 <= max_price_volatility < 0.005  # 0.3-0.5%
+              
+              level1_triggered = (
+                  vix_condition and volume_condition and price_condition
+              )
+            end note
+            
+            alt Level 1 异动检测到
+                MAS -> VU: validate_level1_anomaly(indicators)
+                activate VU
+                VU -> VU: validate_level1_criteria()
+                
+                alt Level 1 验证通过
+                    VU --> MAS: level1_anomaly_confirmed(confidence=80%+)
+                    deactivate VU
+                    
+                    MAS -> MAS: generate_level1_anomaly_alert()
+                    note right MAS
+                      Level 1 异动响应:
+                      anomaly_event = {
+                          'level': 1,
+                          'severity': 'MEDIUM',
+                          'strategy': 'CAUTIOUS_PARTICIPATION',
+                          'recommended_position': 'SMALL_TEST_SIZE',
+                          'confidence': confidence_score
+                      }
+                    end note
+                    
+                    MAS -> TO: notify_level1_anomaly(anomaly_event)
+                    activate TO
+                    TO -> TO: execute_level1_response_strategy()
+                    TO --> MAS: level1_response_initiated
+                    deactivate TO
+                    
+                else Level 1 验证失败
+                    VU --> MAS: level1_anomaly_rejected(reason)
+                    deactivate VU
+                    note right MAS: 无异动，继续正常监控
+                end
+                
+            else 无异动检测到
+                MAS -> MAS: record_normal_market_conditions()
+                note right MAS: 市场条件正常，继续监控
+            end
+        end
+    end
+    
+    == 4. 异动事件记录和分析 ==
+    
+    alt 任何级别异动检测到
+        MAS -> DAL: record_anomaly_event(anomaly_event)
+        activate DAL
+        
+        DAL -> DAL: store_anomaly_details()
+        note right DAL
+          异动事件记录:
+          - 异动级别和严重程度
+          - 触发指标详细数值
+          - 验证过程和置信度
+          - 响应策略和执行结果
+          - 市场环境背景信息
+        end note
+        
+        DAL -> DAL: update_anomaly_statistics()
+        DAL --> MAS: anomaly_event_recorded
+        deactivate DAL
+        
+        MAS -> MAS: analyze_anomaly_patterns()
+        note right MAS
+          异动模式分析:
+          - 异动频率统计
+          - 异动类型分布
+          - 预测模型优化
+          - 检测准确率评估
+        end note
+    end
+end
+
+== 5. 异动检测性能监控 ==
+
+MAS -> VU: monitor_detection_performance()
+activate VU
+
+VU -> VU: measure_detection_latency()
+note right VU
+  性能监控指标:
+  detection_latency = alert_time - event_occurrence_time
+  target_latency = 10_seconds
+  
+  classification_accuracy = correct_classifications / total_classifications
+  target_accuracy = 0.85  # 85%
+  
+  false_positive_rate = false_positives / total_alerts
+  false_negative_rate = missed_anomalies / total_actual_anomalies
+end note
+
+VU -> VU: assess_classification_accuracy()
+VU -> VU: calculate_detection_statistics()
+
+alt 性能达标
+    VU --> MAS: performance_satisfactory(latency<10s, accuracy>85%)
+else 性能不达标
+    VU --> MAS: performance_issues_detected(bottlenecks, accuracy_gaps)
+    
+    MAS -> MAS: optimize_detection_algorithms()
+    note right MAS
+      检测优化措施:
+      - 调整异动阈值参数
+      - 优化数据处理pipeline
+      - 改进验证算法
+      - 增强交叉验证机制
+    end note
+end
+deactivate VU
+
+== 6. 异动配置动态调整 ==
+
+MAS -> CM: update_anomaly_thresholds(performance_feedback)
+activate CM
+
+CM -> CM: analyze_threshold_effectiveness()
+note right CM
+  阈值优化分析:
+  - 基于历史准确率调整
+  - 市场环境适应性调整
+  - 季节性和周期性考虑
+  - 监管要求和风险承受度
+end note
+
+CM -> CM: recalibrate_detection_parameters()
+CM --> MAS: updated_anomaly_config(new_thresholds)
+deactivate CM
+
+MAS -> MAS: apply_updated_configuration()
+
+note over MAS, TO
+  **验收标准**:
+  ✓ 异动检测延迟<10秒
+  ✓ 异动分类准确率>85%
+  ✓ 支持异动阈值配置
+  ✓ 异动事件完整记录和分析
+end note
+
+@enduml

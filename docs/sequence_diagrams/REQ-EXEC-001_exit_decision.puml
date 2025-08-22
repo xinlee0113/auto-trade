@@ -1,0 +1,329 @@
+@startuml REQ-EXEC-001 动态出场决策流程时序图
+!theme plain
+
+title REQ-EXEC-001: 动态出场决策 - 跨类流程时序图
+
+participant "OptionTradingService" as OTS
+participant "RiskManagementService" as RMS
+participant "MarketAnalysisService" as MAS
+participant "GreeksCalculationEngine" as GCE
+participant "DataAccessLayer" as DAL
+participant "ExternalAPIAdapter" as EAA
+participant "ConfigurationManager" as CM
+
+note over OTS, CM
+  **需求**: REQ-EXEC-001 动态出场决策
+  **出场评分因子**: 盈利目标、时间衰减、Greeks变化、市场环境、动量持续性
+  **分级执行**: 紧急出场(≥100分)、主动出场(80-99)、谨慎出场(60-79)、继续持有(<60)
+  **目标**: <1秒决策、>95%执行成功率
+end note
+
+== 1. 出场决策系统初始化 ==
+
+OTS -> CM: get_exit_decision_config()
+activate CM
+
+CM -> CM: load_exit_parameters()
+note right CM
+  出场决策参数:
+  - PROFIT_TARGET_40PCT: 100分
+  - PROFIT_TARGET_30PCT: 70分
+  - STOP_LOSS_25PCT: 100分
+  - TIME_LIMIT_6MIN: 100分
+  - GREEKS_CHANGE_WEIGHT: 60分
+  - MARKET_ENV_WEIGHT: ±40分
+  - MOMENTUM_WEIGHT: ±30分
+end note
+
+CM --> OTS: ExitDecisionConfig(thresholds, weights, execution_rules)
+deactivate CM
+
+== 2. 持仓实时监控和出场评分 ==
+
+loop 实时持仓监控
+    OTS -> DAL: get_position_current_status(position_id)
+    activate DAL
+    
+    DAL -> EAA: get_real_time_option_price(position.symbol)
+    activate EAA
+    EAA --> DAL: current_market_data(price, bid, ask, volume)
+    deactivate EAA
+    
+    DAL --> OTS: PositionStatus(current_price, unrealized_pnl, time_held)
+    deactivate DAL
+    
+    == 2.1 盈利目标评估 (0-100分) ==
+    
+    OTS -> OTS: evaluate_profit_target(position, current_status)
+    note right OTS
+      pnl_pct = position.unrealized_pnl_pct
+      
+      if pnl_pct >= 0.4:  # 40%+
+          profit_score = 100
+          reason = "达到目标盈利40%"
+      elif pnl_pct >= 0.3:  # 30%+
+          profit_score = 70
+          reason = "盈利30%，考虑止盈"
+      elif pnl_pct <= -0.25:  # -25%
+          profit_score = 100
+          reason = "触发止损25%"
+      else:
+          profit_score = max(0, pnl_pct * 100)
+    end note
+    
+    == 2.2 时间衰减压力评估 (0-80分) ==
+    
+    OTS -> OTS: evaluate_time_pressure(position, time_held)
+    note right OTS
+      time_held_minutes = time_held / 60
+      time_pressure = min(80, (time_held_minutes / 6) * 80)
+      
+      if time_held >= 360:  # 6分钟
+          time_score = 100
+          reason = "时间止损"
+      else:
+          time_score = time_pressure
+    end note
+    
+    == 2.3 Greeks变化评估 (0-60分) ==
+    
+    OTS -> GCE: calculate_current_greeks(position)
+    activate GCE
+    GCE --> OTS: current_greeks(delta, gamma, theta, vega)
+    deactivate GCE
+    
+    OTS -> OTS: evaluate_greeks_changes(position, current_greeks)
+    note right OTS
+      delta_change = abs(current_delta - entry_delta)
+      gamma_decay = current_gamma / entry_gamma
+      theta_impact = cumulative_theta_decay
+      
+      greeks_pressure = (
+          delta_change * 100 + 
+          (1 - gamma_decay) * 30 + 
+          theta_impact * 30
+      )
+      greeks_score = min(60, greeks_pressure)
+    end note
+    
+    == 2.4 市场环境变化评估 (-20到+40分) ==
+    
+    OTS -> MAS: get_current_market_environment()
+    activate MAS
+    
+    MAS -> DAL: get_market_volatility_indicators()
+    activate DAL
+    DAL --> MAS: market_indicators(vix_change, volume_trend, liquidity)
+    deactivate DAL
+    
+    MAS --> OTS: MarketEnvironment(volatility_spike, volume_drying_up, trend_strength)
+    deactivate MAS
+    
+    OTS -> OTS: evaluate_market_environment_impact(market_env)
+    note right OTS
+      if market_env.volatility_spike:
+          env_score = -20  # 波动率上升，延迟出场
+          reason = "波动率上升，延迟出场"
+      elif market_env.volume_drying_up:
+          env_score = 40   # 成交量萎缩，快速出场
+          reason = "流动性恶化"
+      else:
+          env_score = 0
+    end note
+    
+    == 2.5 标的动量持续性评估 (-30到+30分) ==
+    
+    OTS -> MAS: analyze_momentum_persistence(position.underlying)
+    activate MAS
+    
+    MAS -> MAS: calculate_momentum_consistency_score()
+    note right MAS
+      momentum_strength = analyze_price_momentum(
+          timeframes=[10s, 30s, 1m],
+          consistency_threshold=0.7
+      )
+    end note
+    
+    MAS --> OTS: momentum_consistency_score
+    deactivate MAS
+    
+    OTS -> OTS: evaluate_momentum_impact(momentum_score)
+    note right OTS
+      if momentum_score > 0.8:
+          momentum_score = -30  # 强动量，继续持有
+          reason = "动量强劲，继续持有"
+      elif momentum_score < 0.3:
+          momentum_score = 30   # 动量衰减，准备出场
+          reason = "动量衰减"
+      else:
+          momentum_score = 0
+    end note
+    
+    == 2.6 综合出场评分计算 ==
+    
+    OTS -> OTS: calculate_composite_exit_score()
+    note right OTS
+      exit_score = (
+          profit_score +           # 0-100分
+          time_score +            # 0-80分
+          greeks_score +          # 0-60分
+          env_score +             # -20到+40分
+          momentum_score          # -30到+30分
+      )
+      
+      confidence = calculate_decision_confidence(
+          score_components=[profit_score, time_score, greeks_score]
+      )
+    end note
+end
+
+== 3. 出场决策执行 ==
+
+OTS -> OTS: make_exit_decision(exit_score, confidence, reasons)
+
+alt exit_score >= 100
+    == 3.1 紧急出场 (Score ≥ 100) ==
+    
+    OTS -> OTS: prepare_emergency_exit()
+    note right OTS
+      decision = {
+          'action': 'EMERGENCY_EXIT',
+          'execution_type': 'MARKET_ORDER',
+          'urgency': 'IMMEDIATE',
+          'reason': primary_reason
+      }
+    end note
+    
+    OTS -> EAA: execute_market_order(position, "紧急出场")
+    activate EAA
+    EAA --> OTS: order_executed(execution_report)
+    deactivate EAA
+    
+else exit_score >= 80 AND exit_score < 100
+    == 3.2 主动出场 (Score 80-99) ==
+    
+    OTS -> OTS: prepare_active_exit()
+    note right OTS
+      decision = {
+          'action': 'ACTIVE_EXIT',
+          'execution_type': 'LIMIT_ORDER',
+          'price_improvement': 0.01,  # 1bp改善
+          'timeout': 30  # 30秒超时
+      }
+    end note
+    
+    OTS -> EAA: execute_limit_order(position, spread_improvement=0.01)
+    activate EAA
+    
+    EAA -> EAA: calculate_improved_price()
+    EAA -> EAA: place_limit_order_with_timeout()
+    
+    alt 限价单成交
+        EAA --> OTS: limit_order_filled(execution_report)
+    else 超时未成交
+        EAA --> OTS: limit_order_timeout()
+        OTS -> EAA: convert_to_market_order()
+        EAA --> OTS: market_order_executed(execution_report)
+    end
+    deactivate EAA
+    
+else exit_score >= 60 AND exit_score < 80
+    == 3.3 谨慎出场 (Score 60-79) ==
+    
+    OTS -> OTS: prepare_cautious_exit()
+    note right OTS
+      decision = {
+          'action': 'CAUTIOUS_EXIT',
+          'execution_type': 'CONDITIONAL_ORDER',
+          'trigger_improvement': 0.02,  # 2bp触发改善
+          'monitoring_period': 60  # 60秒监控期
+      }
+    end note
+    
+    OTS -> EAA: place_conditional_order(position, trigger_improvement=0.02)
+    activate EAA
+    EAA --> OTS: conditional_order_placed(order_id)
+    deactivate EAA
+    
+    OTS -> OTS: monitor_conditional_order(order_id)
+    
+else exit_score < 60
+    == 3.4 继续持有 (Score < 60) ==
+    
+    OTS -> OTS: continue_holding_with_updates()
+    note right OTS
+      decision = {
+          'action': 'CONTINUE_HOLD',
+          'updates': ['update_trailing_stop', 'adjust_monitoring_frequency'],
+          'next_evaluation': 30  # 30秒后重新评估
+      }
+    end note
+    
+    OTS -> RMS: update_stop_loss(position, trailing_stop=True)
+    activate RMS
+    RMS --> OTS: stop_loss_updated
+    deactivate RMS
+    
+    OTS -> OTS: schedule_next_evaluation(30)
+end
+
+== 4. 出场执行结果处理 ==
+
+alt 出场执行成功
+    OTS -> DAL: record_exit_execution(position, execution_report, decision_data)
+    activate DAL
+    DAL --> OTS: execution_recorded
+    deactivate DAL
+    
+    OTS -> RMS: update_risk_metrics(closed_position)
+    activate RMS
+    RMS --> OTS: risk_metrics_updated
+    deactivate RMS
+    
+    OTS -> OTS: analyze_exit_performance(decision_score, actual_result)
+    note right OTS
+      performance_analysis = {
+          'exit_timing_quality': calculate_timing_score(),
+          'execution_quality': calculate_execution_score(),
+          'decision_accuracy': compare_predicted_vs_actual(),
+          'lessons_learned': extract_decision_insights()
+      }
+    end note
+    
+else 出场执行失败
+    OTS -> OTS: handle_execution_failure(error, position)
+    note right OTS
+      failure_handling = {
+          'retry_attempts': 3,
+          'fallback_strategy': 'MARKET_ORDER',
+          'escalation_threshold': 10,  # 10秒
+          'manual_intervention_alert': True
+      }
+    end note
+    
+    OTS -> EAA: retry_execution_with_fallback()
+    activate EAA
+    EAA --> OTS: fallback_execution_result
+    deactivate EAA
+end
+
+== 5. 出场决策系统优化 ==
+
+OTS -> OTS: update_decision_model(historical_performance)
+note right OTS
+  决策模型优化:
+  - 分析历史决策准确性
+  - 调整评分权重
+  - 优化阈值参数
+  - 改进市场环境判断
+end note
+
+note over OTS, CM
+  **验收标准**:
+  ✓ 出场决策响应时间<1秒
+  ✓ 出场执行成功率>95%
+  ✓ 详细记录决策过程和理由
+  ✓ 支持出场参数优化调整
+end note
+
+@enduml

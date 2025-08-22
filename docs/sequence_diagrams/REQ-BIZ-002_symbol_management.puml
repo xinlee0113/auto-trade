@@ -1,0 +1,168 @@
+@startuml REQ-BIZ-002 标的证券管理流程时序图
+!theme plain
+
+title REQ-BIZ-002: 标的证券管理 - 跨类流程时序图
+
+participant "ConfigurationManager" as CM
+participant "MarketAnalysisService" as MAS
+participant "DataAccessLayer" as DAL
+participant "ExternalAPIAdapter" as EAA
+participant "ValidationUtility" as VU
+participant "CacheRepository" as CR
+
+note over CM, CR
+  **需求**: REQ-BIZ-002 标的证券管理
+  **标的范围**: QQQ、SPY、纳斯达克七姐妹
+  **期权类型**: 仅0DTE期权(当日到期)
+  **流动性要求**: 成交量>50手、价差<3%、报价连续
+end note
+
+== 1. 系统启动时标的配置 ==
+
+MAS -> CM: load_target_symbols()
+activate CM
+
+CM -> CM: load_predefined_symbols()
+note right CM
+  预定义标的:
+  - QQQ (纳斯达克100 ETF)
+  - SPY (标普500 ETF)  
+  - AAPL, MSFT, GOOGL
+  - AMZN, NVDA, TSLA, META
+end note
+
+CM --> MAS: symbols_list["QQQ", "SPY", "AAPL"...]
+deactivate CM
+
+== 2. 标的数据订阅 ==
+
+MAS -> DAL: subscribe_symbols(symbols_list)
+activate DAL
+
+loop 每个标的
+    DAL -> EAA: subscribe_real_time_data(symbol)
+    activate EAA
+    
+    EAA -> EAA: validate_symbol_exists(symbol)
+    EAA -> EAA: check_trading_hours(symbol)
+    
+    EAA --> DAL: subscription_confirmed(symbol)
+    deactivate EAA
+end
+
+DAL --> MAS: all_symbols_subscribed
+deactivate DAL
+
+== 3. 0DTE期权筛选 ==
+
+MAS -> DAL: get_option_chains(symbols)
+activate DAL
+
+DAL -> EAA: fetch_option_chains(symbols)
+activate EAA
+
+loop 每个标的的期权链
+    EAA -> EAA: fetch_option_data(symbol)
+    
+    EAA -> VU: validate_option_data(raw_data)
+    activate VU
+    VU --> EAA: validated_data
+    deactivate VU
+    
+    EAA -> EAA: filter_0dte_options(validated_data)
+    note right EAA
+      筛选条件:
+      - expiry_date == today()
+      - option_type in ['call', 'put']
+      - 排除非当日到期合约
+    end note
+end
+
+EAA --> DAL: dte_options_data
+deactivate EAA
+
+== 4. 流动性实时检查 ==
+
+DAL -> DAL: apply_liquidity_filter(dte_options)
+
+loop 每个0DTE期权
+    DAL -> VU: check_liquidity_requirements(option)
+    activate VU
+    
+    VU -> VU: validate_volume(option.volume >= 50)
+    VU -> VU: validate_spread(option.spread < 0.03)
+    VU -> VU: validate_quote_stability(option)
+    
+    alt 流动性合格
+        VU --> DAL: liquidity_passed(option)
+    else 流动性不足
+        VU --> DAL: liquidity_failed(option, reason)
+        DAL -> DAL: exclude_option(option)
+    end
+    deactivate VU
+end
+
+== 5. 数据缓存和更新 ==
+
+DAL -> CR: cache_filtered_options(qualified_options)
+activate CR
+
+CR -> CR: set_cache_with_ttl(options, ttl=60s)
+CR --> DAL: options_cached
+deactivate CR
+
+DAL --> MAS: qualified_symbols_and_options
+deactivate DAL
+
+== 6. 实时监控和维护 ==
+
+loop 实时监控
+    MAS -> DAL: refresh_symbol_status()
+    activate DAL
+    
+    DAL -> CR: get_cached_options()
+    activate CR
+    CR --> DAL: cached_options
+    deactivate CR
+    
+    alt 缓存过期
+        DAL -> EAA: refresh_option_data(symbols)
+        activate EAA
+        EAA --> DAL: fresh_data
+        deactivate EAA
+        
+        DAL -> VU: revalidate_liquidity(fresh_data)
+        activate VU
+        VU --> DAL: updated_qualified_options
+        deactivate VU
+        
+        DAL -> CR: update_cache(updated_options)
+        activate CR
+        CR --> DAL: cache_updated
+        deactivate CR
+    end
+    
+    DAL --> MAS: current_qualified_symbols
+    deactivate DAL
+    
+    alt 标的被暂停交易
+        MAS -> DAL: handle_symbol_suspension(symbol)
+        activate DAL
+        DAL -> CR: remove_from_cache(symbol)
+        activate CR
+        CR --> DAL: symbol_removed
+        deactivate CR
+        DAL --> MAS: symbol_excluded
+        deactivate DAL
+    end
+end
+
+note over CM, CR
+  **验收标准**:
+  ✓ 系统仅监控指定的8个标的证券
+  ✓ 自动筛选0DTE期权，排除其他到期日
+  ✓ 实时监控流动性，自动过滤不合格期权
+  ✓ 缓存机制提高性能，TTL=60秒
+end note
+
+@enduml

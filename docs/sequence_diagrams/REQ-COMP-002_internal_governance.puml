@@ -1,0 +1,588 @@
+@startuml REQ-COMP-002 内部治理流程时序图
+!theme plain
+
+title REQ-COMP-002: 内部治理 - 跨类流程时序图
+
+participant "SystemController" as SC
+participant "ValidationUtility" as VU
+participant "ConfigurationManager" as CM
+participant "TradingOrchestrator" as TO
+participant "RiskManagementService" as RMS
+participant "DataAccessLayer" as DAL
+participant "LoggingUtility" as LU
+participant "ExternalAPIAdapter" as EAA
+
+note over SC, EAA
+  **需求**: REQ-COMP-002 内部治理
+  **策略审批流程**: 策略设计评审、风险评估报告、回测验证审查、监管部门审批
+  **持续监督机制**: 策略绩效定期评估、风险指标持续监控、合规检查审计、定期策略审查优化
+  **治理目标**: 审批流程清晰可执行、监督机制有效运行、文档管理规范完整、审计追踪完整可查
+end note
+
+== 1. 内部治理体系初始化 ==
+
+SC -> CM: initialize_internal_governance_system()
+activate CM
+
+CM -> CM: load_governance_framework()
+note right CM
+  内部治理框架配置:
+  
+  **治理结构**:
+  - 策略委员会 (Strategy Committee)
+  - 风险管理委员会 (Risk Committee)  
+  - 技术审查委员会 (Tech Review Committee)
+  - 合规监察委员会 (Compliance Committee)
+  
+  **审批权限**:
+  - 策略设计审批: 策略委员会
+  - 风险参数审批: 风险管理委员会
+  - 技术变更审批: 技术审查委员会
+  - 合规政策审批: 合规监察委员会
+  
+  **审核周期**:
+  - 策略绩效审查: 每周
+  - 风险指标评估: 每日
+  - 技术系统审计: 每月
+  - 合规检查: 每季度
+  
+  **文档管理**:
+  - 文档版本控制
+  - 审批记录保存
+  - 变更历史追踪
+  - 访问权限管理
+end note
+
+CM --> SC: GovernanceConfig(structure, authority_matrix, review_cycles, document_policies)
+deactivate CM
+
+SC -> DAL: setup_governance_data_infrastructure()
+activate DAL
+
+DAL -> DAL: create_governance_document_repository()
+note right DAL
+  治理文档库结构:
+  
+  **策略文档库**:
+  - 策略设计文档
+  - 策略评审报告
+  - 策略变更记录
+  - 策略绩效分析
+  
+  **风险文档库**:
+  - 风险评估报告
+  - 风险限额文档
+  - 风险监控报告
+  - 风险事件分析
+  
+  **合规文档库**:
+  - 合规政策文档
+  - 合规检查报告
+  - 违规事件记录
+  - 整改措施跟踪
+  
+  **审计文档库**:
+  - 审计计划文档
+  - 审计执行记录
+  - 审计发现报告
+  - 整改跟踪记录
+end note
+
+DAL --> SC: governance_infrastructure_ready
+deactivate DAL
+
+== 2. 策略审批流程 ==
+
+== 2.1 新策略设计评审 ==
+
+TO -> VU: submit_strategy_for_approval(strategy_proposal)
+activate VU
+
+VU -> VU: conduct_strategy_design_review()
+note right VU
+  策略设计评审:
+  
+  **策略逻辑审查**:
+  - 策略理论基础验证
+  - 算法逻辑正确性检查
+  - 参数设置合理性评估
+  - 预期收益风险分析
+  
+  **技术实现审查**:
+  - 代码质量评估
+  - 系统性能影响分析
+  - 安全性风险评估
+  - 可维护性评价
+  
+  **市场环境适应性**:
+  - 目标市场分析
+  - 流动性要求评估
+  - 监管环境符合性
+  - 竞争优势分析
+end note
+
+VU -> LU: document_strategy_review_process(review_findings)
+activate LU
+LU --> VU: review_process_documented
+deactivate LU
+
+alt 策略设计通过评审
+    VU -> RMS: request_risk_assessment(strategy_proposal)
+    activate RMS
+    
+    == 2.2 风险评估报告 ==
+    
+    RMS -> RMS: conduct_comprehensive_risk_assessment()
+    note right RMS
+      策略风险评估:
+      
+      **市场风险评估**:
+      - VaR计算和压力测试
+      - 最大回撤分析
+      - 尾部风险评估
+      - 流动性风险分析
+      
+      **模型风险评估**:
+      - 模型假设验证
+      - 参数敏感性分析
+      - 模型局限性识别
+      - 模型失效情景分析
+      
+      **操作风险评估**:
+      - 系统故障风险
+      - 人员操作风险
+      - 流程控制风险
+      - 第三方依赖风险
+      
+      **集中度风险评估**:
+      - 单一标的集中度
+      - 策略相关性分析
+      - 时间集中度风险
+      - 地域集中度风险
+    end note
+    
+    RMS -> LU: generate_risk_assessment_report(risk_analysis)
+    activate LU
+    LU --> RMS: risk_report_generated
+    deactivate LU
+    
+    RMS --> VU: risk_assessment_completed(risk_report, approval_recommendation)
+    deactivate RMS
+    
+    == 2.3 回测验证审查 ==
+    
+    VU -> TO: request_backtest_validation(strategy_proposal)
+    activate TO
+    
+    TO -> TO: perform_comprehensive_backtesting()
+    note right TO
+      回测验证要求:
+      
+      **历史数据回测**:
+      - 多年度历史数据测试
+      - 不同市场环境验证
+      - 样本内外测试
+      - 走势拟合度检验
+      
+      **模拟交易验证**:
+      - 实时模拟交易测试
+      - 执行质量验证
+      - 滑点影响分析
+      - 流动性冲击测试
+      
+      **压力测试**:
+      - 极端市场情景测试
+      - 系统故障情景测试
+      - 流动性枯竭测试
+      - 相关性崩溃测试
+      
+      **绩效分析**:
+      - 收益风险指标分析
+      - 与基准对比分析
+      - 策略稳定性验证
+      - 可扩展性评估
+    end note
+    
+    TO -> LU: generate_backtest_validation_report(backtest_results)
+    activate LU
+    LU --> TO: backtest_report_generated
+    deactivate LU
+    
+    TO --> VU: backtest_validation_completed(backtest_report, validation_status)
+    deactivate TO
+    
+    == 2.4 监管部门审批流程 ==
+    
+    VU -> VU: compile_regulatory_approval_package()
+    note right VU
+      监管审批文件包:
+      - 策略设计完整文档
+      - 风险评估详细报告
+      - 回测验证结果报告
+      - 合规性声明文件
+      - 技术架构说明
+      - 运营流程文档
+    end note
+    
+    VU -> EAA: submit_regulatory_approval_request(approval_package)
+    activate EAA
+    
+    EAA -> EAA: coordinate_with_regulatory_authorities()
+    note right EAA
+      监管沟通协调:
+      - 提交审批申请
+      - 回应监管问询
+      - 提供补充材料
+      - 接受现场检查
+      - 获取正式批复
+    end note
+    
+    alt 监管审批通过
+        EAA --> VU: regulatory_approval_granted(approval_certificate)
+        
+        VU -> CM: activate_approved_strategy(strategy_proposal, approvals)
+        activate CM
+        CM --> VU: strategy_activated
+        deactivate CM
+        
+    else 监管审批被拒
+        EAA --> VU: regulatory_approval_denied(rejection_reasons)
+        
+        VU -> LU: log_strategy_rejection(rejection_details)
+        activate LU
+        LU --> VU: rejection_logged
+        deactivate LU
+    end
+    deactivate EAA
+
+else 策略设计未通过评审
+    VU -> LU: log_strategy_design_rejection(review_issues)
+    activate LU
+    LU --> VU: design_rejection_logged
+    deactivate LU
+end
+
+VU --> TO: strategy_approval_process_completed(final_status, approval_documents)
+deactivate VU
+
+== 3. 持续监督机制 ==
+
+== 3.1 策略绩效定期评估 ==
+
+loop 每周策略绩效评估
+    SC -> TO: conduct_weekly_strategy_performance_review()
+    activate TO
+    
+    TO -> DAL: collect_strategy_performance_data(week_period)
+    activate DAL
+    DAL --> TO: performance_metrics(returns, risks, execution_quality)
+    deactivate DAL
+    
+    TO -> TO: analyze_strategy_effectiveness()
+    note right TO
+      策略绩效分析:
+      
+      **收益分析**:
+      - 绝对收益表现
+      - 风险调整收益
+      - 与基准对比
+      - 收益稳定性分析
+      
+      **风险分析**:
+      - 实际vs预期风险
+      - 风险指标变化趋势
+      - 异常风险事件分析
+      - 风险预算使用情况
+      
+      **执行分析**:
+      - 交易执行质量
+      - 滑点成本分析
+      - 流动性影响评估
+      - 系统性能表现
+      
+      **策略稳健性**:
+      - 不同市场环境表现
+      - 参数敏感性分析
+      - 模型漂移检测
+      - 策略衰减评估
+    end note
+    
+    TO -> VU: evaluate_strategy_compliance_with_targets(performance_analysis)
+    activate VU
+    
+    VU -> VU: assess_performance_against_targets()
+    note right VU
+      目标符合性评估:
+      - 收益目标达成情况
+      - 风险控制有效性
+      - 策略指标偏离度
+      - 改进措施建议
+    end note
+    
+    alt 策略表现符合预期
+        VU -> LU: log_satisfactory_performance(performance_summary)
+        activate LU
+        LU --> VU: performance_logged
+        deactivate LU
+        
+    else 策略表现偏离预期
+        VU -> VU: trigger_strategy_review_process()
+        note right VU
+          策略审查触发:
+          - 深度原因分析
+          - 策略调整建议
+          - 风险缓解措施
+          - 监管部门通报
+        end note
+        
+        VU -> LU: log_performance_deviation(deviation_analysis, action_plan)
+        activate LU
+        LU --> VU: deviation_logged
+        deactivate LU
+    end
+    
+    VU --> TO: weekly_review_completed(review_results, recommendations)
+    deactivate VU
+    
+    TO --> SC: strategy_performance_review_completed
+    deactivate TO
+end
+
+== 3.2 风险指标持续监控 ==
+
+loop 每日风险监控
+    SC -> RMS: conduct_daily_risk_monitoring()
+    activate RMS
+    
+    RMS -> DAL: collect_current_risk_metrics()
+    activate DAL
+    DAL --> RMS: risk_indicators(var, exposure, concentrations)
+    deactivate DAL
+    
+    RMS -> RMS: evaluate_risk_indicator_trends()
+    note right RMS
+      风险监控分析:
+      
+      **风险水平评估**:
+      - 当前风险vs限额
+      - 风险变化趋势
+      - 风险集中度分析
+      - 极端情景影响
+      
+      **早期预警信号**:
+      - 风险指标异常
+      - 相关性变化
+      - 流动性恶化
+      - 模型失效征象
+      
+      **风险预算管理**:
+      - 风险预算使用率
+      - 风险分配效率
+      - 风险收益优化
+      - 动态风险调整
+    end note
+    
+    RMS -> VU: validate_risk_governance_compliance(risk_analysis)
+    activate VU
+    
+    VU -> VU: check_risk_management_effectiveness()
+    note right VU
+      风险治理检查:
+      - 风险政策执行情况
+      - 风险限额遵守情况
+      - 风险报告及时性
+      - 风险决策记录完整性
+    end note
+    
+    VU --> RMS: risk_governance_assessment(compliance_status, issues)
+    deactivate VU
+    
+    RMS --> SC: daily_risk_monitoring_completed(risk_status, alerts)
+    deactivate RMS
+end
+
+== 3.3 合规检查和审计 ==
+
+loop 每季度合规审计
+    SC -> VU: conduct_quarterly_compliance_audit()
+    activate VU
+    
+    VU -> DAL: collect_compliance_audit_evidence(quarter_period)
+    activate DAL
+    DAL --> VU: audit_evidence(records, documents, logs)
+    deactivate DAL
+    
+    VU -> VU: perform_comprehensive_compliance_review()
+    note right VU
+      合规审计内容:
+      
+      **交易合规审计**:
+      - 交易记录完整性
+      - 交易授权合规性
+      - 交易限额遵守情况
+      - 交易报告及时性
+      
+      **风险管理合规**:
+      - 风险管理政策执行
+      - 风险计量模型验证
+      - 风险报告准确性
+      - 风险决策记录
+      
+      **运营合规审计**:
+      - 操作流程合规性
+      - 系统控制有效性
+      - 数据质量管理
+      - 应急预案执行
+      
+      **监管合规审计**:
+      - 监管要求符合性
+      - 监管报告质量
+      - 监管沟通记录
+      - 违规事件处理
+    end note
+    
+    VU -> LU: generate_compliance_audit_report(audit_findings)
+    activate LU
+    
+    LU -> LU: document_audit_findings_and_recommendations()
+    note right LU
+      审计报告内容:
+      - 审计范围和方法
+      - 主要发现和问题
+      - 风险等级评估
+      - 改进建议措施
+      - 整改时间计划
+      - 责任人员分工
+    end note
+    
+    LU --> VU: audit_report_generated
+    deactivate LU
+    
+    VU -> VU: track_remediation_actions()
+    note right VU
+      整改跟踪:
+      - 整改措施制定
+      - 整改进度监控
+      - 整改效果验证
+      - 持续改进机制
+    end note
+    
+    VU --> SC: quarterly_compliance_audit_completed(audit_report, action_plan)
+    deactivate VU
+end
+
+== 4. 定期策略审查和优化 ==
+
+loop 年度策略全面审查
+    SC -> TO: conduct_annual_strategy_comprehensive_review()
+    activate TO
+    
+    TO -> DAL: collect_annual_strategy_data()
+    activate DAL
+    DAL --> TO: comprehensive_strategy_metrics
+    deactivate DAL
+    
+    TO -> TO: perform_strategy_lifecycle_analysis()
+    note right TO
+      策略全生命周期分析:
+      
+      **策略演进分析**:
+      - 策略表现历史回顾
+      - 策略参数演变轨迹
+      - 市场环境变化影响
+      - 策略适应性评估
+      
+      **竞争优势分析**:
+      - 策略独特性评估
+      - 市场竞争态势分析
+      - 技术优势可持续性
+      - 策略护城河评估
+      
+      **未来发展规划**:
+      - 策略改进方向
+      - 技术升级计划
+      - 市场扩展机会
+      - 风险管理优化
+    end note
+    
+    TO -> VU: evaluate_strategy_governance_effectiveness(strategy_analysis)
+    activate VU
+    
+    VU -> VU: assess_governance_framework_adequacy()
+    note right VU
+      治理框架评估:
+      - 审批流程有效性
+      - 监督机制充分性
+      - 文档管理完整性
+      - 决策质量评估
+      - 改进建议制定
+    end note
+    
+    VU -> LU: update_governance_policies_and_procedures(assessment_results)
+    activate LU
+    
+    LU -> LU: revise_governance_documentation()
+    note right LU
+      治理文档更新:
+      - 政策制度修订
+      - 流程优化改进
+      - 职责权限调整
+      - 监控指标优化
+      - 培训材料更新
+    end note
+    
+    LU --> VU: governance_documentation_updated
+    deactivate LU
+    
+    VU --> TO: annual_strategy_review_completed(review_report, governance_updates)
+    deactivate VU
+    
+    TO --> SC: comprehensive_strategy_review_completed
+    deactivate TO
+end
+
+== 5. 文档管理和版本控制 ==
+
+SC -> CM: maintain_governance_document_lifecycle()
+activate CM
+
+CM -> CM: implement_document_version_control()
+note right CM
+  文档版本控制:
+  
+  **版本管理策略**:
+  - 语义化版本编号
+  - 变更历史完整记录
+  - 审批流程集成
+  - 自动化版本标签
+  
+  **访问权限控制**:
+  - 基于角色的访问控制
+  - 文档安全分类
+  - 审计日志记录
+  - 定期权限审查
+  
+  **文档生命周期**:
+  - 创建审批流程
+  - 定期审查更新
+  - 归档策略管理
+  - 废弃文档处理
+end note
+
+CM -> DAL: archive_historical_governance_documents()
+activate DAL
+DAL --> CM: documents_archived_with_metadata
+deactivate DAL
+
+CM --> SC: document_management_system_maintained
+deactivate CM
+
+note over SC, EAA
+  **验收标准**:
+  ✓ 审批流程清晰可执行
+  ✓ 监督机制有效运行
+  ✓ 文档管理规范完整
+  ✓ 审计追踪完整可查
+end note
+
+@enduml
