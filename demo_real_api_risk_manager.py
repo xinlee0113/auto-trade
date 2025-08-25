@@ -1515,16 +1515,28 @@ class RealAPIRiskManagerDemo:
                 return
             
             # 💰 获取真实市价（Ask价格买入）
+            # 📊 获取真实市价
+            print(f"🔍 [调试] 期权代码: {selected_option['symbol']}")
+            print(f"🔍 [调试] 期权链原始价格: ask={selected_option.get('ask', 'N/A')}, bid={selected_option.get('bid', 'N/A')}, latest={selected_option.get('latest_price', 'N/A')}")
+            
             market_ask = self._get_real_time_option_price(selected_option['symbol'])
+            print(f"🔍 [调试] 实时价格获取结果: {market_ask}")
+            
             if market_ask and market_ask > 0:
                 market_price = market_ask
                 print(f"🔄 更新期权市价: ${market_price:.2f} (实时Ask)")
             else:
-                market_price = max(selected_option.get('ask', 0), selected_option.get('price', 0), 0.01)
+                option_ask = selected_option.get('ask', 0)
+                option_price = selected_option.get('price', 0)
+                option_latest = selected_option.get('latest_price', 0)
+                
+                market_price = max(option_ask, option_price, option_latest, 0.01)
                 print(f"📋 使用期权链价格: ${market_price:.2f}")
+                print(f"🔍 [调试] 价格来源: ask={option_ask}, price={option_price}, latest={option_latest}")
             
-            # 确保价格为正
-            market_price = max(market_price, 0.01)
+            # 确保价格为正，但设置合理下限
+            market_price = max(market_price, 0.05)  # 提高最小价格到0.05
+            print(f"🔍 [调试] 最终下单价格: ${market_price:.2f}")
             
             # 🚀 执行真实PAPER下单
             print(f"💼 执行买入: {selected_option['symbol']} x1手 @ ${market_price:.2f}")
@@ -2276,7 +2288,7 @@ class RealAPIRiskManagerDemo:
                 'symbol': best_option.symbol,
                 'option_type': option_type,
                 'strike': best_option.strike,
-                'price': best_option.latest_price,
+                'price': matched_option.get('latest_price', best_option.latest_price),  # 🔧 修复：从原始数据获取价格
                 'bid': matched_option.get('bid_price', best_option.bid),      # 从原始数据获取bid价格
                 'ask': matched_option.get('ask_price', best_option.ask),      # 从原始数据获取ask价格
                 'latest_price': matched_option.get('latest_price', best_option.latest_price),  # 最新价格
