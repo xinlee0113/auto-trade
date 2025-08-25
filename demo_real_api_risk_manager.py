@@ -2341,9 +2341,20 @@ class RealAPIRiskManagerDemo:
                 (option_chain['strike'] <= underlying_price + atm_range)
             ].copy()
             
+            # 🔍 调试：检查 atm_options 的列名
+            print(f"🔍 atm_options 列名: {list(atm_options.columns)}")
+            
             # 分离CALL和PUT期权（使用正确的字段名）
-            call_options = atm_options[atm_options['right'] == 'CALL']
-            put_options = atm_options[atm_options['right'] == 'PUT']
+            # 检查 put_call 字段是否存在，如果不存在则使用 right 字段
+            if 'put_call' in atm_options.columns:
+                call_options = atm_options[atm_options['put_call'] == 'CALL']
+                put_options = atm_options[atm_options['put_call'] == 'PUT']
+            elif 'right' in atm_options.columns:
+                call_options = atm_options[atm_options['right'] == 'CALL']
+                put_options = atm_options[atm_options['right'] == 'PUT']
+            else:
+                print("❌ 无法找到期权类型字段")
+                return
             
             print(f"✅ 筛选ATM期权: CALL {len(call_options)} 个, PUT {len(put_options)} 个")
             
@@ -2359,9 +2370,9 @@ class RealAPIRiskManagerDemo:
                     'symbol': best_call['symbol'],
                     'option_type': 'CALL',
                     'strike': best_call['strike'],
-                    'price': best_call.get('latest_price', 0),
-                    'bid': best_call.get('bid', 0),
-                    'ask': best_call.get('ask', 0),
+                    'price': best_call.get('ask', best_call.get('latest_price', 0)),  # 🔧 优先使用ask价格
+                    'bid': best_call.get('bid', 0),              # 🔧 修复：使用处理后的字段名
+                    'ask': best_call.get('ask', 0),              # 🔧 修复：使用处理后的字段名  
                     'latest_price': best_call.get('latest_price', 0),
                     'volume': best_call.get('volume', 0),
                     'score': 95.0,  # ATM期权评分
@@ -2395,9 +2406,9 @@ class RealAPIRiskManagerDemo:
                     'symbol': best_put['symbol'],
                     'option_type': 'PUT',
                     'strike': best_put['strike'],
-                    'price': best_put.get('latest_price', 0),
-                    'bid': best_put.get('bid', 0),
-                    'ask': best_put.get('ask', 0),
+                    'price': best_put.get('ask', best_put.get('latest_price', 0)),  # 🔧 优先使用ask价格
+                    'bid': best_put.get('bid', 0),               # 🔧 修复：使用处理后的字段名
+                    'ask': best_put.get('ask', 0),               # 🔧 修复：使用处理后的字段名
                     'latest_price': best_put.get('latest_price', 0),
                     'volume': best_put.get('volume', 0),
                     'score': 95.0,  # ATM期权评分
