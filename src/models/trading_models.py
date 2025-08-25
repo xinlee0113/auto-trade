@@ -322,6 +322,35 @@ class AlertMessage:
 
 
 @dataclass
+class GreeksData:
+    """期权Greeks数据模型"""
+    symbol: str
+    timestamp: datetime
+    underlying_price: float
+    
+    # Greeks指标
+    delta: float
+    gamma: float
+    theta: float
+    vega: float
+    rho: float
+    
+    # 隐含波动率
+    implied_volatility: float
+    
+    # 时间价值相关
+    time_to_expiry: float  # 剩余时间（年）
+    intrinsic_value: float  # 内在价值
+    time_value: float  # 时间价值
+    
+    # 风险指标
+    delta_exposure: float = 0.0  # Delta敞口
+    gamma_exposure: float = 0.0  # Gamma敞口
+    vega_exposure: float = 0.0   # Vega敞口
+    theta_decay: float = 0.0     # 时间衰减
+
+
+@dataclass
 class SystemStatus:
     """系统状态模型"""
     timestamp: datetime

@@ -2241,6 +2241,12 @@ class RealAPIRiskManagerDemo:
             if 'right' in option_chain_fixed.columns and 'put_call' not in option_chain_fixed.columns:
                 option_chain_fixed['put_call'] = option_chain_fixed['right']
             
+            # 🔧 修复价格字段映射：统一字段名以避免数据丢失
+            if 'bid' in option_chain_fixed.columns and 'bid_price' not in option_chain_fixed.columns:
+                option_chain_fixed['bid_price'] = option_chain_fixed['bid']
+            if 'ask' in option_chain_fixed.columns and 'ask_price' not in option_chain_fixed.columns:
+                option_chain_fixed['ask_price'] = option_chain_fixed['ask']
+            
             print(f"   修复后字段: {list(option_chain_fixed.columns)}")
             
             # 执行期权分析
@@ -2280,24 +2286,21 @@ class RealAPIRiskManagerDemo:
             print(f"   Gamma: {best_option.gamma:.3f}")
             print()
             
-            # 从原始数据中找到对应的期权获取put_call信息
-            matched_option = option_chain_fixed[option_chain_fixed['symbol'] == best_option.symbol].iloc[0]
-            
-            # 转换为字典格式以保持兼容性，确保价格信息完整
+            # 🔧 直接使用OptionAnalyzer结果，避免数据转换丢失
             return {
                 'symbol': best_option.symbol,
                 'option_type': option_type,
                 'strike': best_option.strike,
-                'price': matched_option.get('latest_price', best_option.latest_price),  # 🔧 修复：从原始数据获取价格
-                'bid': matched_option.get('bid_price', best_option.bid),      # 从原始数据获取bid价格
-                'ask': matched_option.get('ask_price', best_option.ask),      # 从原始数据获取ask价格
-                'latest_price': matched_option.get('latest_price', best_option.latest_price),  # 最新价格
+                'price': best_option.latest_price,      # 直接使用分析器结果
+                'bid': best_option.bid,                 # 直接使用分析器结果
+                'ask': best_option.ask,                 # 直接使用分析器结果
+                'latest_price': best_option.latest_price,
                 'volume': best_option.volume,
                 'score': best_option.score,
                 'delta': best_option.delta,
                 'gamma': best_option.gamma,
                 'expiry': best_option.expiry,
-                'put_call': matched_option['put_call']  # 从原始数据获取期权类型
+                'put_call': best_option.right           # 使用分析器的right字段
             }
                 
         except Exception as e:
@@ -2360,32 +2363,15 @@ class RealAPIRiskManagerDemo:
             
             # 4. 筛选并买入最优看涨期权1手
             print("🚀 === 看涨期权测试 ===")
-            if not call_options.empty:
-                # 选择最接近ATM的CALL期权
-                call_options['atm_distance'] = abs(call_options['strike'] - underlying_price)
-                best_call = call_options.loc[call_options['atm_distance'].idxmin()]
-                
-                # 构建期权信息，直接使用DataFrame中的真实价格
-                call_option_info = {
-                    'symbol': best_call['symbol'],
-                    'option_type': 'CALL',
-                    'strike': best_call['strike'],
-                    'price': best_call.get('ask', best_call.get('latest_price', 0)),  # 🔧 优先使用ask价格
-                    'bid': best_call.get('bid', 0),              # 🔧 修复：使用处理后的字段名
-                    'ask': best_call.get('ask', 0),              # 🔧 修复：使用处理后的字段名  
-                    'latest_price': best_call.get('latest_price', 0),
-                    'volume': best_call.get('volume', 0),
-                    'score': 95.0,  # ATM期权评分
-                    'put_call': 'CALL',
-                    'right': 'CALL',
-                    'expiry': '2025-08-26'
-                }
-                print(f"✅ 选中最优CALL期权 (使用真实市价):")
+            call_option_info = self._select_best_option(option_chain, "CALL", underlying_price)
+            if call_option_info:
+                print(f"✅ 选中最优CALL期权 (使用专业分析器):")
                 print(f"   期权代码: {call_option_info['symbol']}")
                 print(f"   行权价: ${call_option_info['strike']:.2f}")
                 print(f"   期权价格: ${call_option_info['price']:.2f}")
                 print(f"   Bid/Ask: ${call_option_info['bid']:.2f}/${call_option_info['ask']:.2f}")
                 print(f"   成交量: {call_option_info['volume']:,}")
+                print(f"   评分: {call_option_info['score']:.1f}/100")
                 print()
                 
                 self._execute_paper_order(call_option_info, "BUY", 1, "看涨期权")
@@ -2396,32 +2382,15 @@ class RealAPIRiskManagerDemo:
             
             # 5. 筛选并买入最优看跌期权1手  
             print("📉 === 看跌期权测试 ===")
-            if not put_options.empty:
-                # 选择最接近ATM的PUT期权
-                put_options['atm_distance'] = abs(put_options['strike'] - underlying_price)
-                best_put = put_options.loc[put_options['atm_distance'].idxmin()]
-                
-                # 构建期权信息，直接使用DataFrame中的真实价格
-                put_option_info = {
-                    'symbol': best_put['symbol'],
-                    'option_type': 'PUT',
-                    'strike': best_put['strike'],
-                    'price': best_put.get('ask', best_put.get('latest_price', 0)),  # 🔧 优先使用ask价格
-                    'bid': best_put.get('bid', 0),               # 🔧 修复：使用处理后的字段名
-                    'ask': best_put.get('ask', 0),               # 🔧 修复：使用处理后的字段名
-                    'latest_price': best_put.get('latest_price', 0),
-                    'volume': best_put.get('volume', 0),
-                    'score': 95.0,  # ATM期权评分
-                    'put_call': 'PUT',
-                    'right': 'PUT',
-                    'expiry': '2025-08-26'
-                }
-                print(f"✅ 选中最优PUT期权 (使用真实市价):")
+            put_option_info = self._select_best_option(option_chain, "PUT", underlying_price)
+            if put_option_info:
+                print(f"✅ 选中最优PUT期权 (使用专业分析器):")
                 print(f"   期权代码: {put_option_info['symbol']}")
                 print(f"   行权价: ${put_option_info['strike']:.2f}")
                 print(f"   期权价格: ${put_option_info['price']:.2f}")
                 print(f"   Bid/Ask: ${put_option_info['bid']:.2f}/${put_option_info['ask']:.2f}")
                 print(f"   成交量: {put_option_info['volume']:,}")
+                print(f"   评分: {put_option_info['score']:.1f}/100")
                 print()
                 
                 self._execute_paper_order(put_option_info, "BUY", 1, "看跌期权")

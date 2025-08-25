@@ -146,14 +146,25 @@ class OptionAnalyzer:
             # 使用字段映射获取数据
             field_map = OptionConstants.FIELD_MAPPINGS
             
+            # 🔧 修复latest_price获取逻辑：优先使用ask作为latest_price
+            raw_latest_price = float(row.get(field_map['latest_price'], 0))
+            bid_price = float(row.get(field_map['bid'], 0))
+            ask_price = float(row.get(field_map['ask'], 0))
+            
+            # 如果latest_price为0，使用ask价格作为代替
+            if raw_latest_price == 0 and ask_price > 0:
+                effective_latest_price = ask_price
+            else:
+                effective_latest_price = raw_latest_price
+            
             option_data = OptionData(
                 symbol=row.get('symbol', ''),
                 strike=float(row.get('strike', 0)),
                 right=row.get(field_map['right'], ''),
                 expiry=row.get('expiry', ''),
-                latest_price=float(row.get(field_map['latest_price'], 0)),
-                bid=float(row.get(field_map['bid'], 0)),
-                ask=float(row.get(field_map['ask'], 0)),
+                latest_price=effective_latest_price,
+                bid=bid_price,
+                ask=ask_price,
                 volume=int(row.get(field_map['volume'], 0)),
                 open_interest=int(row.get(field_map['open_interest'], 0)),
                 delta=float(row.get(field_map['delta'], 0)) or self.calculator.estimate_delta(
