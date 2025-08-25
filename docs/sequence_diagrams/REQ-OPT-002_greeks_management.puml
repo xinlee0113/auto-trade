@@ -1,0 +1,406 @@
+@startuml REQ-OPT-002 动态Greeks管理流程时序图
+!theme plain
+
+title REQ-OPT-002: 动态Greeks管理 - 跨类流程时序图
+
+participant "RiskManagementService" as RMS
+participant "GreeksCalculationEngine" as GCE
+participant "OptionTradingService" as OTS
+participant "DataAccessLayer" as DAL
+participant "MarketAnalysisService" as MAS
+participant "ValidationUtility" as VU
+participant "CacheRepository" as CR
+participant "ConfigurationManager" as CM
+
+note over RMS, CM
+  **需求**: REQ-OPT-002 动态Greeks管理
+  **计算范围**: 一阶Greeks(Delta/Gamma/Theta/Vega/Rho) + 二阶Greeks(Charm/Vanna/Volga)
+  **风险评估**: 组合Greeks聚合计算 + 风险敞口监控
+  **精度要求**: 计算误差<0.1%、实时更新、历史追踪
+end note
+
+== 1. Greeks管理系统初始化 ==
+
+RMS -> CM: initialize_greeks_management_system()
+activate CM
+
+CM -> CM: load_greeks_calculation_config()
+note right CM
+  Greeks计算配置:
+  - 一阶Greeks: Delta, Gamma, Theta, Vega, Rho
+  - 二阶Greeks: Charm, Vanna, Volga  
+  - 计算精度: 误差<0.1%
+  - 更新频率: 实时计算
+  - 历史保存: 1440个数据点(24小时)
+  - 风险阈值: Delta±100, Gamma>50, Theta>$1000, Vega>$500
+end note
+
+CM --> RMS: GreeksManagementConfig(calculation_params, risk_thresholds, update_frequency)
+deactivate CM
+
+RMS -> GCE: initialize_greeks_calculation_engine(config)
+activate GCE
+
+GCE -> GCE: setup_greeks_calculation_framework()
+note right GCE
+  Greeks计算框架:
+  - Black-Scholes模型参数
+  - 数值微分算法设置
+  - 并行计算线程池
+  - 内存缓存优化
+end note
+
+GCE -> GCE: preload_greeks_formulas()
+GCE -> GCE: setup_calculation_cache()
+
+GCE --> RMS: greeks_engine_initialized
+deactivate GCE
+
+== 2. 单期权Greeks实时计算 ==
+
+RMS -> DAL: get_option_market_data(option_symbol)
+activate DAL
+
+DAL -> CR: check_greeks_cache(option_symbol)
+activate CR
+
+alt Greeks缓存有效
+    CR --> DAL: cached_greeks(greeks_data, timestamp)
+else Greeks缓存过期或缺失
+    DAL -> DAL: fetch_current_option_data()
+    
+    DAL -> GCE: calculate_comprehensive_greeks(option_data)
+    activate GCE
+    
+    == 2.1 一阶Greeks计算 ==
+    
+    par 并行计算一阶Greeks
+        GCE -> GCE: calculate_delta()
+        note right GCE
+          Delta = ∂V/∂S
+          Call: Δ = N(d1)
+          Put: Δ = N(d1) - 1
+          其中: d1 = (ln(S/K) + (r + σ²/2)T) / (σ√T)
+        end note
+
+    also
+        GCE -> GCE: calculate_gamma()
+        note right GCE
+          Gamma = ∂²V/∂S²
+          Γ = φ(d1) / (S * σ * √T)
+          其中: φ(d1) = 标准正态分布概率密度函数
+        end note
+
+    also
+        GCE -> GCE: calculate_theta()
+        note right GCE
+          Theta = ∂V/∂T
+          Call: Θ = -S*φ(d1)*σ/(2√T) - r*K*e^(-rT)*N(d2)
+          Put: Θ = -S*φ(d1)*σ/(2√T) + r*K*e^(-rT)*N(-d2)
+        end note
+
+    also
+        GCE -> GCE: calculate_vega()
+        note right GCE
+          Vega = ∂V/∂σ
+          ν = S * √T * φ(d1)
+        end note
+
+    also
+        GCE -> GCE: calculate_rho()
+        note right GCE
+          Rho = ∂V/∂r
+          Call: ρ = K*T*e^(-rT)*N(d2)
+          Put: ρ = -K*T*e^(-rT)*N(-d2)
+        end note
+    end
+    
+    == 2.2 二阶Greeks计算 ==
+    
+    par 并行计算二阶Greeks
+        GCE -> GCE: calculate_charm()
+        note right GCE
+          Charm = ∂²V/∂S∂T = ∂Δ/∂T
+          衡量Delta随时间的变化率
+        end note
+
+    also
+        GCE -> GCE: calculate_vanna()
+        note right GCE
+          Vanna = ∂²V/∂S∂σ = ∂Δ/∂σ
+          衡量Delta对隐含波动率的敏感性
+        end note
+
+    also
+        GCE -> GCE: calculate_volga()
+        note right GCE
+          Volga = ∂²V/∂σ² = ∂ν/∂σ
+          衡量Vega对隐含波动率变化的敏感性
+        end note
+    end
+    
+    GCE -> VU: validate_greeks_calculation_accuracy(greeks_results)
+    activate VU
+    
+    VU -> VU: check_calculation_precision()
+    note right VU
+      精度验证:
+      - 数值微分误差<0.1%
+      - Greeks数学关系一致性
+      - 边界条件合理性检查
+      - 与基准模型对比验证
+    end note
+    
+    alt 精度验证通过
+        VU --> GCE: validation_passed(precision_metrics)
+    else 精度验证失败
+        VU --> GCE: validation_failed(error_details)
+        GCE -> GCE: adjust_calculation_parameters()
+        GCE -> GCE: recalculate_with_higher_precision()
+    end
+    deactivate VU
+    
+    GCE --> DAL: OptionGreeks(delta, gamma, theta, vega, rho, charm, vanna, volga, timestamp)
+    deactivate GCE
+    
+    DAL -> CR: cache_greeks_data(option_symbol, greeks, ttl=30s)
+    CR --> DAL: greeks_cached
+end
+deactivate CR
+
+DAL --> RMS: option_greeks_data
+deactivate DAL
+
+== 3. 组合Greeks聚合计算 ==
+
+RMS -> OTS: get_current_portfolio_positions()
+activate OTS
+OTS --> RMS: portfolio_positions[]
+deactivate OTS
+
+RMS -> RMS: initialize_portfolio_greeks_aggregation()
+
+loop 每个持仓位置
+    RMS -> GCE: get_position_greeks(position)
+    activate GCE
+    GCE --> RMS: position_greeks(weighted_by_quantity)
+    deactivate GCE
+    
+    RMS -> RMS: aggregate_position_greeks(position_greeks, quantity)
+    note right RMS
+      位置Greeks加权聚合:
+      position_delta = individual_delta * position_quantity
+      position_gamma = individual_gamma * position_quantity
+      position_theta = individual_theta * position_quantity
+      position_vega = individual_vega * position_quantity
+    end note
+end
+
+RMS -> RMS: calculate_portfolio_level_greeks()
+note right RMS
+  组合Greeks计算:
+  portfolio_delta = Σ(position_delta_i)
+  portfolio_gamma = Σ(position_gamma_i)
+  portfolio_theta = Σ(position_theta_i)
+  portfolio_vega = Σ(position_vega_i)
+  
+  美元风险敞口:
+  delta_exposure = portfolio_delta * 100  # 每$1标的变动影响
+  gamma_risk = portfolio_gamma * 100      # Gamma风险
+  theta_decay_daily = portfolio_theta * 365 # 日时间衰减
+  vega_risk = portfolio_vega * 0.01       # IV变动1%影响
+end note
+
+== 4. Greeks风险评估和监控 ==
+
+RMS -> RMS: assess_greeks_risk_levels(portfolio_greeks)
+
+== 4.1 Delta风险评估 ==
+
+RMS -> RMS: evaluate_delta_risk()
+note right RMS
+  Delta风险评估:
+  delta_risk_score = 0
+  
+  if abs(portfolio_delta) > 100:
+      delta_risk_score += 30  # 高Delta敞口
+  if abs(portfolio_delta) > 200:
+      delta_risk_score += 50  # 极高Delta敞口
+      
+  delta_hedge_required = abs(portfolio_delta) > 150
+end note
+
+== 4.2 Gamma风险评估 ==
+
+RMS -> RMS: evaluate_gamma_risk()
+note right RMS
+  Gamma风险评估:
+  gamma_risk_score = 0
+  
+  if portfolio_gamma > 50:
+      gamma_risk_score += 25  # 高Gamma风险
+  if portfolio_gamma > 100:
+      gamma_risk_score += 45  # 极高Gamma风险
+      
+  gamma_hedge_required = portfolio_gamma > 75
+end note
+
+== 4.3 Theta衰减风险评估 ==
+
+RMS -> RMS: evaluate_theta_decay_risk()
+note right RMS
+  Theta衰减风险评估:
+  daily_theta_decay = abs(portfolio_theta) * 365 / 100
+  
+  theta_risk_score = 0
+  if daily_theta_decay > 1000:  # 日衰减>$1000
+      theta_risk_score += 35
+  if daily_theta_decay > 2000:  # 日衰减>$2000  
+      theta_risk_score += 55
+      
+  theta_monitoring_required = daily_theta_decay > 500
+end note
+
+== 4.4 Vega风险评估 ==
+
+RMS -> RMS: evaluate_vega_risk()
+note right RMS
+  Vega风险评估:
+  vega_exposure = abs(portfolio_vega) * 0.01  # IV变动1%影响
+  
+  vega_risk_score = 0
+  if vega_exposure > 500:  # >$500敞口
+      vega_risk_score += 20
+  if vega_exposure > 1000: # >$1000敞口
+      vega_risk_score += 40
+      
+  vega_hedge_required = vega_exposure > 800
+end note
+
+== 4.5 综合风险评分 ==
+
+RMS -> RMS: calculate_comprehensive_greeks_risk()
+note right RMS
+  综合Greeks风险评分:
+  total_greeks_risk = (
+      delta_risk_score +     # 0-80分
+      gamma_risk_score +     # 0-70分  
+      theta_risk_score +     # 0-90分
+      vega_risk_score        # 0-60分
+  )
+  
+  risk_level = {
+      0-50: "LOW",
+      51-100: "MEDIUM", 
+      101-150: "HIGH",
+      151+: "CRITICAL"
+  }
+end note
+
+== 5. Greeks历史追踪和分析 ==
+
+RMS -> DAL: store_greeks_historical_data(portfolio_greeks, timestamp)
+activate DAL
+
+DAL -> DAL: maintain_greeks_history(max_records=1440)
+note right DAL
+  Greeks历史数据管理:
+  - 保存周期: 每分钟一次
+  - 保存时长: 24小时(1440个记录)
+  - 数据清理: 自动删除过期数据
+  - 压缩存储: 优化存储空间
+end note
+
+DAL --> RMS: historical_data_stored
+deactivate DAL
+
+RMS -> MAS: analyze_greeks_trends(historical_greeks)
+activate MAS
+
+MAS -> MAS: calculate_greeks_moving_averages()
+MAS -> MAS: detect_greeks_trend_changes()
+MAS -> MAS: identify_greeks_anomalies()
+
+MAS --> RMS: GreeksTrendAnalysis(trends, patterns, anomalies)
+deactivate MAS
+
+== 6. 动态对冲建议 ==
+
+alt Greeks风险需要对冲
+    RMS -> RMS: generate_hedging_recommendations()
+    note right RMS
+      对冲建议生成:
+      
+      if delta_hedge_required:
+          hedge_delta_quantity = -portfolio_delta / hedge_delta
+          recommend_delta_hedge(instrument, quantity)
+          
+      if gamma_hedge_required:
+          hedge_gamma_instrument = select_optimal_gamma_hedge()
+          recommend_gamma_hedge(instrument, rationale)
+          
+      if vega_hedge_required:
+          hedge_vega_strategy = design_vega_hedge_strategy()
+          recommend_vega_hedge(strategy, expected_impact)
+    end note
+    
+    RMS -> OTS: submit_hedging_recommendations(hedge_suggestions)
+    activate OTS
+    
+    OTS -> OTS: evaluate_hedging_feasibility()
+    OTS -> OTS: calculate_hedging_costs()
+    
+    alt 对冲建议可行
+        OTS --> RMS: hedging_approved(execution_plan)
+        RMS -> RMS: monitor_hedging_execution()
+    else 对冲建议不可行
+        OTS --> RMS: hedging_rejected(alternative_suggestions)
+        RMS -> RMS: revise_hedging_strategy()
+    end
+    deactivate OTS
+
+else Greeks风险可接受
+    RMS -> RMS: continue_greeks_monitoring()
+    note right RMS: 继续监控，无需对冲
+end
+
+== 7. Greeks性能监控和优化 ==
+
+RMS -> VU: monitor_greeks_calculation_performance()
+activate VU
+
+VU -> VU: measure_calculation_latency()
+VU -> VU: assess_calculation_accuracy()
+VU -> VU: evaluate_system_resource_usage()
+
+alt 性能达标
+    VU --> RMS: performance_satisfactory(metrics)
+else 性能不达标
+    VU --> RMS: performance_issues_detected(bottlenecks)
+    
+    RMS -> GCE: optimize_greeks_calculation()
+    activate GCE
+    
+    GCE -> GCE: implement_calculation_optimizations()
+    note right GCE
+      性能优化措施:
+      - 增量计算: 仅重计算变化部分
+      - 并行处理: 多线程并行计算
+      - 缓存策略: 智能缓存常用结果
+      - 算法优化: 使用更高效算法
+    end note
+    
+    GCE --> RMS: optimization_completed
+    deactivate GCE
+end
+deactivate VU
+
+note over RMS, CM
+  **验收标准**:
+  ✓ Greeks计算精度误差<0.1%
+  ✓ 组合Greeks实时更新
+  ✓ 风险评估响应时间<1秒
+  ✓ 支持历史Greeks数据存储和分析
+end note
+
+@enduml

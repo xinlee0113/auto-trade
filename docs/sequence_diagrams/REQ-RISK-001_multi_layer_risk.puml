@@ -1,0 +1,270 @@
+@startuml REQ-RISK-001 多层风险控制流程时序图
+!theme plain
+
+title REQ-RISK-001: 多层风险控制 - 跨类流程时序图
+
+participant "TradingOrchestrator" as TO
+participant "RiskManagementService" as RMS
+participant "DataAccessLayer" as DAL
+participant "RiskCalculationEngine" as RCE
+participant "OptionTradingService" as OTS
+participant "MarketAnalysisService" as MAS
+participant "ExternalAPIAdapter" as EAA
+
+note over TO, EAA
+  **需求**: REQ-RISK-001 多层风险控制
+  **第一层**: 入场风控 (市场环境、流动性、仓位、时间)
+  **第二层**: 持仓风控 (PnL、Greeks、时间衰减、异动)
+  **第三层**: 紧急风控 (系统风险、连接中断、强制平仓)
+end note
+
+== 第一层: 入场风控 ==
+
+TO -> RMS: pre_trade_risk_check(signal, position_size)
+activate RMS
+
+== 1.1 市场环境过滤 ==
+
+RMS -> MAS: get_market_environment_status()
+activate MAS
+
+MAS -> DAL: get_market_indicators(VIX, volatility, trading_session)
+activate DAL
+DAL --> MAS: market_data(vix=18.5, volatility=0.25, session="OPEN")
+deactivate DAL
+
+MAS -> MAS: assess_market_conditions()
+note right MAS
+  market_filter = {
+    'vix_acceptable': VIX < 30,
+    'volatility_normal': 0.1 < volatility < 0.5,
+    'trading_hours': session in ["OPEN", "EXTENDED"],
+    'no_market_halt': not market_halted
+  }
+end note
+
+MAS --> RMS: market_assessment(safe=True/False, reasons)
+deactivate MAS
+
+== 1.2 期权流动性检查 ==
+
+RMS -> OTS: check_option_liquidity(target_option)
+activate OTS
+
+OTS -> DAL: get_option_market_data(option_symbol)
+activate DAL
+DAL --> OTS: option_data(volume, spread, depth)
+deactivate DAL
+
+OTS -> OTS: validate_liquidity_thresholds()
+note right OTS
+  liquidity_check = {
+    'volume_adequate': volume > 50,
+    'spread_tight': spread < 0.03,
+    'depth_sufficient': bid_size + ask_size > 100,
+    'quote_active': last_quote_age < 30s
+  }
+end note
+
+OTS --> RMS: liquidity_status(passed=True/False, metrics)
+deactivate OTS
+
+== 1.3 仓位规模限制 ==
+
+RMS -> RCE: calculate_position_limits(account_size, current_positions)
+activate RCE
+
+RCE -> RCE: assess_current_exposure()
+note right RCE
+  position_limits = {
+    'single_trade_max': account_size * 0.02,  # 2%
+    'total_exposure_max': account_size * 0.04, # 4%
+    'daily_risk_max': account_size * 0.10,    # 10%
+    'symbol_concentration_max': account_size * 0.15
+  }
+end note
+
+RCE --> RMS: position_limits_check(within_limits=True/False)
+deactivate RCE
+
+== 1.4 时间窗口限制 ==
+
+RMS -> RMS: check_timing_constraints()
+note right RMS
+  timing_check = {
+    'not_in_forbidden_window': not in_forbidden_periods(),
+    'min_interval_respected': time_since_last_trade > 3s,
+    'market_close_buffer': time_to_close > 15min,
+    'earnings_blackout': not in_earnings_period()
+  }
+end note
+
+alt 所有入场风控通过
+    RMS --> TO: pre_trade_approved(position_size, conditions)
+else 任一风控失败
+    RMS --> TO: pre_trade_rejected(reasons, suggested_actions)
+    TO -> TO: log_trade_rejection()
+    note right TO: 交易被拒绝，记录原因
+end
+
+deactivate RMS
+
+== 第二层: 持仓风控 (交易执行后) ==
+
+TO -> OTS: execute_trade(approved_signal)
+activate OTS
+OTS --> TO: position_created(position_id, details)
+deactivate OTS
+
+TO -> RMS: start_position_monitoring(position_id)
+activate RMS
+
+loop 实时持仓监控
+    == 2.1 实时PnL监控 ==
+    
+    RMS -> DAL: get_position_current_value(position_id)
+    activate DAL
+    DAL --> RMS: current_pnl(unrealized, percentage)
+    deactivate DAL
+    
+    RMS -> RMS: check_pnl_thresholds()
+    note right RMS
+      pnl_monitoring = {
+        'stop_loss_triggered': pnl_pct <= -0.25,    # -25%
+        'take_profit_target': pnl_pct >= 0.40,      # +40%
+        'profit_protection': pnl_pct >= 0.30,       # 保护30%+利润
+        'trend_analysis': analyze_pnl_trend()
+      }
+    end note
+    
+    == 2.2 Greeks变化监控 ==
+    
+    RMS -> RCE: calculate_current_greeks(position_id)
+    activate RCE
+    RCE --> RMS: current_greeks(delta, gamma, theta, vega)
+    deactivate RCE
+    
+    RMS -> RMS: assess_greeks_risk()
+    note right RMS
+      greeks_risk = {
+        'delta_change': abs(current_delta - entry_delta),
+        'gamma_decay': current_gamma / entry_gamma,
+        'theta_impact': cumulative_theta_decay,
+        'vega_exposure': position_vega * iv_change
+      }
+    end note
+    
+    == 2.3 时间价值衰减监控 ==
+    
+    RMS -> RMS: calculate_time_decay_pressure()
+    note right RMS
+      time_pressure = {
+        'time_held': current_time - entry_time,
+        'time_to_expiry': expiry_time - current_time,
+        'theta_decay_rate': current_theta,
+        'decay_acceleration': theta_change_rate
+      }
+    end note
+    
+    == 2.4 市场异动监控 ==
+    
+    RMS -> MAS: check_market_anomaly_status()
+    activate MAS
+    MAS --> RMS: anomaly_status(level, impact_assessment)
+    deactivate MAS
+    
+    alt 持仓风险触发
+        RMS -> OTS: execute_risk_action(position_id, action_type)
+        activate OTS
+        
+        alt 止损触发
+            OTS -> EAA: place_market_order(close_position)
+            activate EAA
+            EAA --> OTS: order_executed
+            deactivate EAA
+            
+        else 部分止盈
+            OTS -> EAA: place_limit_order(partial_close)
+            activate EAA
+            EAA --> OTS: order_placed
+            deactivate EAA
+            
+        else 调整止损
+            OTS -> OTS: update_trailing_stop()
+        end
+        
+        OTS --> RMS: risk_action_completed
+        deactivate OTS
+    end
+end
+
+== 第三层: 紧急风控 ==
+
+par 系统性风险监控
+    RMS -> MAS: monitor_systemic_risk()
+    activate MAS
+    
+    MAS -> DAL: get_market_wide_indicators()
+    activate DAL
+    DAL --> MAS: systemic_indicators(vix_spike, volume_surge, correlation)
+    deactivate DAL
+    
+    alt 系统性风险检测
+        MAS --> RMS: systemic_risk_alert(severity="HIGH")
+        
+        RMS -> OTS: emergency_risk_protocol()
+        activate OTS
+        OTS -> OTS: halt_new_positions()
+        OTS -> OTS: prepare_emergency_exit()
+        OTS --> RMS: emergency_mode_activated
+        deactivate OTS
+    end
+    deactivate MAS
+
+else 连接中断监控
+    RMS -> EAA: monitor_connection_health()
+    activate EAA
+    
+    alt 连接中断检测
+        EAA --> RMS: connection_lost_alert()
+        
+        RMS -> OTS: execute_emergency_procedures()
+        activate OTS
+        OTS -> OTS: auto_close_all_positions()
+        OTS -> OTS: switch_to_backup_connection()
+        OTS -> OTS: notify_manual_intervention()
+        OTS --> RMS: emergency_procedures_executed
+        deactivate OTS
+    end
+    deactivate EAA
+
+else 异常波动监控
+    RMS -> MAS: monitor_price_volatility()
+    activate MAS
+    
+    alt 异常波动检测
+        MAS --> RMS: extreme_volatility_alert(jump_size, liquidity_impact)
+        
+        RMS -> OTS: handle_extreme_volatility()
+        activate OTS
+        OTS -> OTS: tighten_stop_losses()
+        OTS -> OTS: reduce_position_sizes()
+        OTS -> OTS: increase_monitoring_frequency()
+        OTS --> RMS: volatility_response_activated
+        deactivate OTS
+    end
+    deactivate MAS
+end
+
+RMS --> TO: risk_monitoring_status(level, active_alerts, actions_taken)
+deactivate RMS
+
+note over TO, EAA
+  **验收标准**:
+  ✓ 风险检测响应时间<30秒
+  ✓ 紧急平仓执行成功率>99%
+  ✓ 所有风险事件完整记录
+  ✓ 风险预警准确率>95%
+end note
+
+@enduml

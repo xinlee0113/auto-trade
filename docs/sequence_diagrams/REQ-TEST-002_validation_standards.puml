@@ -1,0 +1,473 @@
+@startuml REQ-TEST-002 验证通过标准流程时序图
+!theme plain
+
+title REQ-TEST-002: 验证通过标准 - 跨类流程时序图
+
+participant "ValidationUtility" as VU
+participant "SystemController" as SC
+participant "TradingOrchestrator" as TO
+participant "RiskManagementService" as RMS
+participant "OptionTradingService" as OTS
+participant "MarketAnalysisService" as MAS
+participant "DataAccessLayer" as DAL
+participant "LoggingUtility" as LU
+
+note over VU, LU
+  **需求**: REQ-TEST-002 验证通过标准
+  **定量标准**: 胜率>45%、盈亏比>2:1、夏普比率>1.0、最大回撤<10%
+  **定性标准**: 异动捕获有效、风险控制可靠、系统稳定运行
+  **验证流程**: 分阶段验证、量化评估、质量把关
+end note
+
+== 1. 验证标准体系初始化 ==
+
+VU -> VU: initialize_validation_standards()
+activate VU
+
+VU -> VU: define_quantitative_benchmarks()
+note right VU
+  定量验证标准:
+  
+  **交易绩效指标**:
+  - 胜率: >45% (获利交易占比)
+  - 盈亏比: >2:1 (平均盈利/平均亏损)
+  - 夏普比率: >1.0 (风险调整收益)
+  - 最大回撤: <10% (连续亏损峰值)
+  - 年化收益率: >20% (预期年收益)
+  
+  **执行质量指标**:
+  - 信号准确率: >80%
+  - 执行成功率: >95%
+  - 平均延迟: <2秒
+  - 系统可用性: >99.5%
+  
+  **风险控制指标**:
+  - 风险预警准确率: >95%
+  - 止损执行成功率: >99%
+  - 限额遵守率: 100%
+  - 异常处理成功率: >90%
+end note
+
+VU -> VU: define_qualitative_criteria()
+note right VU
+  定性验证标准:
+  
+  **策略有效性**:
+  - 异动捕获机制有效
+  - 双轨制协调工作正常
+  - Greeks管理策略合理
+  - 市场适应性良好
+  
+  **系统稳定性**:
+  - 连续运行无故障
+  - 异常情况自动恢复
+  - 数据处理准确及时
+  - 日志记录完整清晰
+  
+  **合规性要求**:
+  - 交易记录完整
+  - 风险控制措施到位
+  - 监管要求满足
+  - 审计追踪完备
+end note
+
+VU --> VU: validation_standards_defined
+deactivate VU
+
+== 2. 定量指标验证流程 ==
+
+== 2.1 交易绩效评估 ==
+
+VU -> TO: evaluate_trading_performance()
+activate TO
+
+TO -> OTS: collect_trading_statistics()
+activate OTS
+
+OTS -> OTS: calculate_win_rate()
+note right OTS
+  胜率计算:
+  total_trades = len(completed_trades)
+  winning_trades = len([t for t in trades if t.pnl > 0])
+  win_rate = winning_trades / total_trades
+  
+  标准: win_rate >= 0.45
+end note
+
+OTS -> OTS: calculate_profit_loss_ratio()
+note right OTS
+  盈亏比计算:
+  avg_profit = mean([t.pnl for t in trades if t.pnl > 0])
+  avg_loss = abs(mean([t.pnl for t in trades if t.pnl < 0]))
+  pl_ratio = avg_profit / avg_loss
+  
+  标准: pl_ratio >= 2.0
+end note
+
+OTS -> RMS: get_risk_adjusted_metrics()
+activate RMS
+
+RMS -> RMS: calculate_sharpe_ratio()
+note right RMS
+  夏普比率计算:
+  returns = [trade.return_rate for trade in trades]
+  excess_returns = [r - risk_free_rate for r in returns]
+  sharpe_ratio = mean(excess_returns) / std(excess_returns)
+  
+  标准: sharpe_ratio >= 1.0
+end note
+
+RMS -> RMS: calculate_maximum_drawdown()
+note right RMS
+  最大回撤计算:
+  cumulative_returns = cumulative_sum(daily_returns)
+  running_max = running_maximum(cumulative_returns)
+  drawdowns = (running_max - cumulative_returns) / running_max
+  max_drawdown = max(drawdowns)
+  
+  标准: max_drawdown <= 0.10
+end note
+
+RMS --> OTS: risk_metrics(sharpe_ratio, max_drawdown, volatility)
+deactivate RMS
+
+OTS --> TO: trading_performance_data(win_rate, pl_ratio, sharpe, drawdown)
+deactivate OTS
+
+TO -> VU: submit_performance_metrics(performance_data)
+activate VU
+
+VU -> VU: validate_performance_standards()
+note right VU
+  绩效标准验证:
+  performance_check = {
+      'win_rate_pass': win_rate >= 0.45,
+      'pl_ratio_pass': pl_ratio >= 2.0,
+      'sharpe_pass': sharpe_ratio >= 1.0,
+      'drawdown_pass': max_drawdown <= 0.10
+  }
+  
+  overall_performance_pass = all(performance_check.values())
+end note
+
+alt 交易绩效达标
+    VU --> TO: performance_validation_passed(metrics)
+else 交易绩效不达标
+    VU --> TO: performance_validation_failed(failed_metrics, gaps)
+    TO -> TO: initiate_performance_improvement()
+end
+deactivate VU
+
+TO --> VU: trading_performance_evaluation_complete
+deactivate TO
+
+== 2.2 执行质量评估 ==
+
+VU -> MAS: evaluate_signal_accuracy()
+activate MAS
+
+MAS -> MAS: analyze_signal_prediction_accuracy()
+note right MAS
+  信号准确率分析:
+  predicted_signals = [s for s in signals if s.executed]
+  correct_predictions = [s for s in predicted_signals 
+                        if s.actual_outcome == s.predicted_direction]
+  signal_accuracy = len(correct_predictions) / len(predicted_signals)
+  
+  标准: signal_accuracy >= 0.80
+end note
+
+MAS --> VU: signal_accuracy_metrics(accuracy_rate, confidence_intervals)
+deactivate MAS
+
+VU -> OTS: evaluate_execution_quality()
+activate OTS
+
+OTS -> OTS: calculate_execution_success_rate()
+note right OTS
+  执行成功率计算:
+  attempted_orders = len(all_orders)
+  successful_orders = len([o for o in all_orders if o.status == 'FILLED'])
+  execution_success_rate = successful_orders / attempted_orders
+  
+  标准: execution_success_rate >= 0.95
+end note
+
+OTS -> OTS: measure_execution_latency()
+note right OTS
+  执行延迟测量:
+  latencies = [o.execution_time - o.signal_time for o in orders]
+  avg_latency = mean(latencies)
+  p95_latency = percentile(latencies, 95)
+  
+  标准: avg_latency <= 2.0 seconds
+end note
+
+OTS --> VU: execution_quality_metrics(success_rate, latency_stats)
+deactivate OTS
+
+VU -> SC: evaluate_system_availability()
+activate SC
+
+SC -> SC: calculate_system_uptime()
+note right SC
+  系统可用性计算:
+  total_operating_time = end_time - start_time
+  downtime_periods = sum(outage_durations)
+  uptime_percentage = (total_operating_time - downtime_periods) / total_operating_time
+  
+  标准: uptime_percentage >= 0.995
+end note
+
+SC --> VU: system_availability_metrics(uptime, outage_analysis)
+deactivate SC
+
+== 2.3 风险控制效果评估 ==
+
+VU -> RMS: evaluate_risk_control_effectiveness()
+activate RMS
+
+RMS -> RMS: assess_risk_warning_accuracy()
+note right RMS
+  风险预警准确率:
+  risk_warnings = [w for w in warnings if w.type == 'RISK_ALERT']
+  confirmed_risks = [w for w in risk_warnings if w.confirmed_by_actual_event]
+  warning_accuracy = len(confirmed_risks) / len(risk_warnings)
+  
+  标准: warning_accuracy >= 0.95
+end note
+
+RMS -> RMS: evaluate_stop_loss_execution()
+note right RMS
+  止损执行成功率:
+  stop_loss_triggers = [t for t in trades if t.triggered_stop_loss]
+  successful_stops = [t for t in stop_loss_triggers if t.stop_executed]
+  stop_success_rate = len(successful_stops) / len(stop_loss_triggers)
+  
+  标准: stop_success_rate >= 0.99
+end note
+
+RMS -> RMS: verify_limit_compliance()
+note right RMS
+  限额遵守率验证:
+  all_trades = get_all_trades()
+  limit_violations = [t for t in all_trades if t.violated_any_limit]
+  compliance_rate = (len(all_trades) - len(limit_violations)) / len(all_trades)
+  
+  标准: compliance_rate == 1.0 (100%)
+end note
+
+RMS --> VU: risk_control_metrics(warning_accuracy, stop_success, compliance)
+deactivate RMS
+
+== 3. 定性标准验证流程 ==
+
+== 3.1 策略有效性定性评估 ==
+
+VU -> TO: assess_strategy_effectiveness()
+activate TO
+
+TO -> MAS: evaluate_anomaly_capture_mechanism()
+activate MAS
+
+MAS -> MAS: analyze_anomaly_detection_quality()
+note right MAS
+  异动捕获质量评估:
+  - 真实异动识别率: >90%
+  - 虚假异动过滤率: >95%
+  - 异动响应时间: <30秒
+  - 异动交易执行质量: 优秀
+end note
+
+MAS --> TO: anomaly_capture_assessment(detection_quality, response_time)
+deactivate MAS
+
+TO -> TO: evaluate_dual_track_coordination()
+note right TO
+  双轨制协调评估:
+  - 轨道切换时机准确性
+  - 资金分配动态调整效果
+  - 常规与异动策略平衡
+  - 协调机制响应速度
+end note
+
+TO -> RMS: evaluate_greeks_management_strategy()
+activate RMS
+
+RMS -> RMS: assess_greeks_risk_control()
+note right RMS
+  Greeks管理策略评估:
+  - 组合Greeks监控有效性
+  - 动态对冲策略合理性
+  - Greeks限额设置适当性
+  - 风险敞口控制效果
+end note
+
+RMS --> TO: greeks_management_assessment(effectiveness_score)
+deactivate RMS
+
+TO --> VU: strategy_effectiveness_evaluation(overall_assessment)
+deactivate TO
+
+== 3.2 系统稳定性定性评估 ==
+
+VU -> SC: evaluate_system_stability()
+activate SC
+
+SC -> SC: assess_continuous_operation_quality()
+note right SC
+  连续运行质量评估:
+  - 无故障运行时长
+  - 性能稳定性
+  - 资源使用效率
+  - 扩展能力验证
+end note
+
+SC -> DAL: evaluate_data_processing_reliability()
+activate DAL
+
+DAL -> DAL: assess_data_accuracy_and_timeliness()
+note right DAL
+  数据处理可靠性:
+  - 数据接收完整性: 100%
+  - 处理延迟控制: <500ms
+  - 数据质量保证: >99.9%
+  - 异常数据处理: 自动过滤
+end note
+
+DAL --> SC: data_reliability_assessment(quality_metrics)
+deactivate DAL
+
+SC -> LU: evaluate_logging_and_monitoring()
+activate LU
+
+LU -> LU: assess_log_completeness_and_clarity()
+note right LU
+  日志监控质量评估:
+  - 日志记录完整性
+  - 错误信息详细程度
+  - 性能监控覆盖率
+  - 审计跟踪可追溯性
+end note
+
+LU --> SC: logging_quality_assessment(coverage, clarity)
+deactivate LU
+
+SC --> VU: system_stability_evaluation(stability_score)
+deactivate SC
+
+== 4. 综合验证结果评估 ==
+
+VU -> VU: compile_comprehensive_validation_results()
+activate VU
+
+VU -> VU: aggregate_quantitative_scores()
+note right VU
+  定量指标汇总:
+  quantitative_results = {
+      'trading_performance': {
+          'win_rate': actual_vs_target,
+          'pl_ratio': actual_vs_target,
+          'sharpe_ratio': actual_vs_target,
+          'max_drawdown': actual_vs_target
+      },
+      'execution_quality': {
+          'signal_accuracy': actual_vs_target,
+          'execution_success': actual_vs_target,
+          'latency': actual_vs_target,
+          'availability': actual_vs_target
+      },
+      'risk_control': {
+          'warning_accuracy': actual_vs_target,
+          'stop_success': actual_vs_target,
+          'compliance': actual_vs_target
+      }
+  }
+end note
+
+VU -> VU: aggregate_qualitative_assessments()
+note right VU
+  定性评估汇总:
+  qualitative_results = {
+      'strategy_effectiveness': {
+          'anomaly_capture': assessment_score,
+          'dual_track_coordination': assessment_score,
+          'greeks_management': assessment_score,
+          'market_adaptation': assessment_score
+      },
+      'system_stability': {
+          'continuous_operation': assessment_score,
+          'data_reliability': assessment_score,
+          'exception_handling': assessment_score,
+          'logging_quality': assessment_score
+      }
+  }
+end note
+
+VU -> VU: calculate_overall_validation_score()
+note right VU
+  综合验证评分:
+  overall_score = (
+      quantitative_weight * quantitative_average +
+      qualitative_weight * qualitative_average
+  )
+  
+  pass_threshold = 85.0  # 85分及以上通过
+  validation_result = "PASS" if overall_score >= pass_threshold else "FAIL"
+end note
+
+== 5. 验证决策和后续行动 ==
+
+alt 综合验证通过
+    VU -> VU: generate_validation_pass_report()
+    note right VU
+      验证通过报告:
+      - 详细验证结果
+      - 优秀表现亮点
+      - 持续改进建议
+      - 生产部署批准
+    end note
+    
+    VU -> SC: approve_production_deployment()
+    activate SC
+    SC -> SC: initiate_production_preparation()
+    SC --> VU: production_deployment_approved
+    deactivate SC
+    
+else 综合验证不通过
+    VU -> VU: generate_validation_fail_report()
+    note right VU
+      验证失败报告:
+      - 未达标项目明细
+      - 差距分析和原因
+      - 改进措施建议
+      - 重新验证计划
+    end note
+    
+    VU -> TO: initiate_improvement_actions()
+    activate TO
+    TO -> TO: develop_improvement_plan()
+    TO -> TO: implement_corrective_measures()
+    TO --> VU: improvement_plan_executed
+    deactivate TO
+    
+    VU -> VU: schedule_revalidation()
+end
+
+VU -> LU: log_validation_completion(result, details)
+activate LU
+LU --> VU: validation_logged
+deactivate LU
+
+VU --> VU: validation_process_complete
+deactivate VU
+
+note over VU, LU
+  **验收标准**:
+  ✓ 定量指标全部达标
+  ✓ 定性评估优秀
+  ✓ 综合评分≥85分
+  ✓ 验证过程完整记录
+end note
+
+@enduml

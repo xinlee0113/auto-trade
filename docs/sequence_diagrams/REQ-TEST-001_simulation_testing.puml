@@ -1,0 +1,446 @@
+@startuml REQ-TEST-001 模拟账户验证流程时序图
+!theme plain
+
+title REQ-TEST-001: 模拟账户验证 - 跨类流程时序图
+
+participant "SystemController" as SC
+participant "TradingOrchestrator" as TO
+participant "MarketAnalysisService" as MAS
+participant "OptionTradingService" as OTS
+participant "RiskManagementService" as RMS
+participant "ExternalAPIAdapter" as EAA
+participant "DataAccessLayer" as DAL
+participant "ValidationUtility" as VU
+
+note over SC, VU
+  **需求**: REQ-TEST-001 模拟账户验证
+  **三阶段验证**: 功能验证(1-2周)、策略验证(3-4周)、稳定性验证(2-3周)
+  **验证方式**: 基于实时市场数据的模拟交易，真实的执行环境
+  **目标**: 替代传统回测，验证系统各种市场环境下的表现
+end note
+
+== Phase 1: 功能验证 (1-2周) ==
+
+SC -> SC: initiate_functional_verification_phase()
+activate SC
+
+== 1.1 系统基础功能正确性测试 ==
+
+SC -> TO: start_basic_functionality_tests()
+activate TO
+
+TO -> MAS: test_market_analysis_functions()
+activate MAS
+
+MAS -> DAL: simulate_market_data_feed()
+activate DAL
+
+DAL -> EAA: connect_to_simulation_environment()
+activate EAA
+
+EAA -> EAA: setup_simulation_api_endpoints()
+note right EAA
+  模拟环境配置:
+  - 使用真实API但模拟账户
+  - 真实市场数据流
+  - 模拟订单执行
+  - 真实的价格和流动性
+end note
+
+EAA --> DAL: simulation_connection_established
+deactivate EAA
+
+DAL -> DAL: stream_real_market_data()
+DAL --> MAS: real_time_market_data_stream
+deactivate DAL
+
+MAS -> MAS: test_market_condition_analysis()
+MAS -> MAS: test_signal_generation_accuracy()
+MAS -> MAS: validate_anomaly_detection()
+
+MAS --> TO: market_analysis_test_results(passed/failed, details)
+deactivate MAS
+
+TO -> OTS: test_option_trading_functions()
+activate OTS
+
+OTS -> OTS: test_option_screening_logic()
+OTS -> OTS: test_greeks_calculation_accuracy()
+OTS -> OTS: test_position_management()
+
+OTS -> EAA: simulate_option_trades()
+activate EAA
+
+EAA -> EAA: place_simulated_orders()
+EAA -> EAA: simulate_order_fills()
+EAA -> EAA: generate_realistic_execution_reports()
+
+EAA --> OTS: simulated_execution_results
+deactivate EAA
+
+OTS --> TO: option_trading_test_results(passed/failed, details)
+deactivate OTS
+
+TO -> RMS: test_risk_management_functions()
+activate RMS
+
+RMS -> RMS: test_risk_calculation_accuracy()
+RMS -> RMS: test_limit_enforcement()
+RMS -> RMS: test_emergency_procedures()
+
+RMS --> TO: risk_management_test_results(passed/failed, details)
+deactivate RMS
+
+TO --> SC: functional_tests_summary(overall_result, module_results)
+deactivate TO
+
+== 1.2 数据接收和处理准确性验证 ==
+
+SC -> DAL: verify_data_processing_accuracy()
+activate DAL
+
+DAL -> VU: validate_data_integrity()
+activate VU
+
+VU -> VU: check_data_completeness()
+VU -> VU: verify_data_timeliness()
+VU -> VU: validate_data_format_consistency()
+
+note right VU
+  数据验证标准:
+  - 完整性: 无缺失数据点
+  - 及时性: 延迟<500ms
+  - 准确性: 与基准数据对比
+  - 一致性: 跨数据源验证
+end note
+
+VU --> DAL: data_validation_results(accuracy_rate, latency_stats)
+deactivate VU
+
+DAL --> SC: data_processing_verification_complete
+deactivate DAL
+
+== 1.3 技术指标计算精度测试 ==
+
+SC -> MAS: verify_technical_indicators_precision()
+activate MAS
+
+MAS -> MAS: run_indicator_accuracy_tests()
+note right MAS
+  指标精度测试:
+  - EMA计算: 与标准公式对比
+  - 动量指标: 历史数据验证
+  - 成交量分析: 统计准确性
+  - 信号生成: 回测验证
+end note
+
+MAS -> VU: validate_calculation_results()
+activate VU
+VU --> MAS: calculation_accuracy_verified(precision_rate>99.9%)
+deactivate VU
+
+MAS --> SC: technical_indicators_verification_complete
+deactivate MAS
+
+== 1.4 风险控制机制有效性测试 ==
+
+SC -> RMS: test_risk_control_effectiveness()
+activate RMS
+
+RMS -> RMS: simulate_risk_scenarios()
+note right RMS
+  风险场景模拟:
+  - 市场暴跌: -5%单日跌幅
+  - 流动性危机: 成交量骤减
+  - 系统性风险: VIX飙升
+  - 个股异动: 单一标的大幅波动
+end note
+
+RMS -> RMS: test_limit_triggers()
+RMS -> RMS: test_emergency_stop_procedures()
+RMS -> RMS: validate_risk_calculation_models()
+
+RMS --> SC: risk_control_test_results(effectiveness_score, response_time)
+deactivate RMS
+
+SC --> SC: phase1_functional_verification_complete
+deactivate SC
+
+== Phase 2: 策略验证 (3-4周) ==
+
+SC -> SC: initiate_strategy_verification_phase()
+activate SC
+
+== 2.1 常规策略胜率统计分析 ==
+
+SC -> TO: start_regular_strategy_testing()
+activate TO
+
+TO -> MAS: configure_regular_trading_mode()
+activate MAS
+
+MAS -> MAS: set_regular_strategy_parameters()
+note right MAS
+  常规策略配置:
+  - 资金分配: 80%
+  - 信号阈值: 保守设置
+  - 持仓时间: 标准区间
+  - 风险控制: 标准限制
+end note
+
+MAS --> TO: regular_strategy_configured
+deactivate MAS
+
+loop 策略验证周期 (3周)
+    TO -> OTS: execute_regular_strategy_trades()
+    activate OTS
+    
+    OTS -> OTS: identify_trading_opportunities()
+    OTS -> OTS: execute_simulated_trades()
+    OTS -> OTS: monitor_position_performance()
+    
+    OTS --> TO: trade_execution_results(pnl, duration, success_rate)
+    deactivate OTS
+    
+    TO -> RMS: collect_strategy_performance_metrics()
+    activate RMS
+    
+    RMS -> RMS: calculate_win_rate()
+    RMS -> RMS: calculate_profit_loss_ratio()
+    RMS -> RMS: assess_risk_adjusted_returns()
+    
+    note right RMS
+      策略性能指标:
+      - 胜率: 获利交易比例
+      - 盈亏比: 平均盈利/平均亏损
+      - 夏普比率: 风险调整收益
+      - 最大回撤: 连续亏损峰值
+    end note
+    
+    RMS --> TO: strategy_performance_analysis
+    deactivate RMS
+end
+
+TO --> SC: regular_strategy_verification_results(win_rate>45%, profit_ratio>2:1)
+deactivate TO
+
+== 2.2 异动策略捕获效果评估 ==
+
+SC -> TO: start_anomaly_strategy_testing()
+activate TO
+
+TO -> MAS: configure_anomaly_detection_mode()
+activate MAS
+
+MAS -> MAS: set_anomaly_detection_sensitivity()
+MAS -> MAS: configure_time_window_management()
+
+MAS --> TO: anomaly_strategy_configured
+deactivate MAS
+
+loop 异动策略测试
+    TO -> MAS: monitor_for_market_anomalies()
+    activate MAS
+    
+    MAS -> MAS: detect_vix_spikes()
+    MAS -> MAS: detect_volume_surges()
+    MAS -> MAS: detect_price_jumps()
+    
+    alt 异动检测到
+        MAS --> TO: anomaly_detected(level, confidence, timing)
+        
+        TO -> OTS: execute_anomaly_strategy()
+        activate OTS
+        
+        OTS -> OTS: rapid_position_entry()
+        OTS -> OTS: monitor_anomaly_development()
+        OTS -> OTS: execute_quick_exit()
+        
+        OTS --> TO: anomaly_trade_result(capture_effectiveness, timing_quality)
+        deactivate OTS
+        
+    else 无异动
+        MAS --> TO: normal_market_conditions
+    end
+    deactivate MAS
+end
+
+TO --> SC: anomaly_strategy_verification_results(capture_rate, false_positive_rate)
+deactivate TO
+
+== 2.3 双轨制协调机制测试 ==
+
+SC -> TO: test_dual_track_coordination()
+activate TO
+
+TO -> TO: simulate_track_coordination_scenarios()
+note right TO
+  协调机制测试场景:
+  1. 异动触发 → 常规轨道暂停
+  2. 异动结束 → 常规轨道恢复
+  3. 资金再平衡 → 轨道资金调整
+  4. 风险超限 → 双轨道保护性关闭
+end note
+
+TO -> MAS: trigger_coordination_events()
+activate MAS
+MAS --> TO: coordination_trigger_executed
+deactivate MAS
+
+TO -> OTS: verify_track_state_transitions()
+activate OTS
+OTS --> TO: state_transition_verified(timing, correctness)
+deactivate OTS
+
+TO --> SC: dual_track_coordination_test_results(coordination_effectiveness)
+deactivate TO
+
+== 2.4 Greeks管理有效性验证 ==
+
+SC -> RMS: verify_greeks_management_effectiveness()
+activate RMS
+
+RMS -> RMS: simulate_greeks_risk_scenarios()
+note right RMS
+  Greeks风险场景:
+  - Delta风险: 标的价格大幅变动
+  - Gamma风险: 接近到期的快速价格变化
+  - Theta衰减: 时间价值快速衰减
+  - Vega风险: 隐含波动率剧烈变化
+end note
+
+RMS -> RMS: test_portfolio_greeks_monitoring()
+RMS -> RMS: test_dynamic_hedging_strategies()
+RMS -> RMS: validate_greeks_based_risk_limits()
+
+RMS --> SC: greeks_management_verification_results(effectiveness_score)
+deactivate RMS
+
+SC --> SC: phase2_strategy_verification_complete
+deactivate SC
+
+== Phase 3: 稳定性验证 (2-3周) ==
+
+SC -> SC: initiate_stability_verification_phase()
+activate SC
+
+== 3.1 连续运行稳定性测试 ==
+
+SC -> SC: start_continuous_operation_test()
+
+loop 连续运行 (5个交易日)
+    SC -> TO: monitor_continuous_operation()
+    activate TO
+    
+    TO -> TO: check_system_health()
+    TO -> TO: monitor_memory_usage()
+    TO -> TO: track_performance_degradation()
+    
+    alt 系统正常
+        TO --> SC: system_operating_normally(uptime, performance_metrics)
+    else 系统异常
+        TO -> TO: log_system_anomaly()
+        TO -> TO: attempt_auto_recovery()
+        TO --> SC: system_anomaly_detected(issue_type, recovery_status)
+    end
+    deactivate TO
+end
+
+SC --> SC: continuous_operation_test_complete(uptime_percentage>99.5%)
+
+== 3.2 高频交易执行质量验证 ==
+
+SC -> OTS: verify_hft_execution_quality()
+activate OTS
+
+OTS -> OTS: measure_execution_latency()
+OTS -> OTS: assess_order_fill_rates()
+OTS -> OTS: analyze_slippage_patterns()
+
+note right OTS
+  执行质量指标:
+  - 平均延迟: <2秒
+  - 成交率: >95%
+  - 滑点控制: 在预期范围内
+  - 执行稳定性: 连续可靠性
+end note
+
+OTS --> SC: hft_execution_quality_verified(latency<2s, fill_rate>95%)
+deactivate OTS
+
+== 3.3 异常情况处理能力测试 ==
+
+SC -> SC: simulate_exceptional_scenarios()
+
+par 异常场景测试
+    SC -> EAA: simulate_network_interruption()
+    activate EAA
+    EAA -> EAA: test_connection_recovery()
+    EAA --> SC: network_recovery_test_results
+    deactivate EAA
+
+also
+    SC -> RMS: simulate_extreme_market_conditions()
+    activate RMS
+    RMS -> RMS: test_crisis_response_procedures()
+    RMS --> SC: crisis_response_test_results
+    deactivate RMS
+
+also
+    SC -> DAL: simulate_data_feed_failures()
+    activate DAL
+    DAL -> DAL: test_backup_data_sources()
+    DAL --> SC: data_failover_test_results
+    deactivate DAL
+end
+
+== 3.4 极端市场环境适应性测试 ==
+
+SC -> TO: test_extreme_market_adaptation()
+activate TO
+
+TO -> TO: simulate_market_crash_scenario()
+TO -> TO: simulate_flash_crash_recovery()
+TO -> TO: simulate_low_liquidity_periods()
+
+TO --> SC: extreme_market_adaptation_results(survival_rate, recovery_time)
+deactivate TO
+
+SC --> SC: phase3_stability_verification_complete
+deactivate SC
+
+== 验证结果汇总和评估 ==
+
+SC -> VU: compile_verification_results()
+activate VU
+
+VU -> VU: aggregate_all_phase_results()
+note right VU
+  验证通过标准:
+  Phase 1: 功能正确性 100%
+  Phase 2: 策略有效性 达标
+  Phase 3: 系统稳定性 >99.5%
+  
+  综合评估: 通过/不通过
+end note
+
+VU -> VU: generate_verification_report()
+
+alt 所有验证通过
+    VU --> SC: verification_passed(detailed_report)
+    SC -> SC: approve_production_deployment()
+else 存在验证失败
+    VU --> SC: verification_failed(failed_items, recommendations)
+    SC -> SC: initiate_issue_resolution()
+end
+deactivate VU
+
+note over SC, VU
+  **验收标准**:
+  ✓ 各阶段测试通过率100%
+  ✓ 测试结果详细记录和分析
+  ✓ 问题修复和回归测试
+  ✓ 测试报告和结论输出
+end note
+
+@enduml

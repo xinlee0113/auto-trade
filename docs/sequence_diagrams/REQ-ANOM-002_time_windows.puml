@@ -1,0 +1,427 @@
+@startuml REQ-ANOM-002 时间窗口管理流程时序图
+!theme plain
+
+title REQ-ANOM-002: 时间窗口管理 - 跨类流程时序图
+
+participant "TradingOrchestrator" as TO
+participant "MarketAnalysisService" as MAS
+participant "OptionTradingService" as OTS
+participant "RiskManagementService" as RMS
+participant "DataAccessLayer" as DAL
+participant "ConfigurationManager" as CM
+participant "ValidationUtility" as VU
+participant "LoggingUtility" as LU
+
+note over TO, LU
+  **需求**: REQ-ANOM-002 时间窗口管理
+  **0-30秒**: 观察确认期 (识别异动类型、评估方向性)
+  **30-60秒**: 黄金入场期 (IV快速上升、流动性充沛)  
+  **60-120秒**: 谨慎入场期 (可能接近峰值、降低仓位)
+  **120秒+**: 禁止入场期 (通常开始回调、专注持仓管理)
+end note
+
+== 1. 时间窗口管理系统初始化 ==
+
+TO -> CM: initialize_time_window_management()
+activate CM
+
+CM -> CM: load_time_window_config()
+note right CM
+  时间窗口配置:
+  
+  **观察确认期 (0-30秒)**:
+  - 策略: 观察和确认
+  - 行动: 识别异动类型、评估方向性、准备资源
+  - 仓位: 禁止开仓
+  - 监控: 实时数据收集和分析
+  
+  **黄金入场期 (30-60秒)**:
+  - 策略: 积极入场
+  - 行动: IV快速上升期、流动性最佳时机
+  - 仓位: 标准仓位或加大仓位
+  - 执行: 优先级最高
+  
+  **谨慎入场期 (60-120秒)**:
+  - 策略: 谨慎参与
+  - 行动: 可能接近峰值、风险上升
+  - 仓位: 减少仓位规模50%
+  - 执行: 提高入场标准
+  
+  **禁止入场期 (120秒+)**:
+  - 策略: 禁止新开仓
+  - 行动: 专注持仓管理、准备出场
+  - 仓位: 0 (不允许新开仓)
+  - 执行: 持仓监控和管理
+end note
+
+CM --> TO: TimeWindowConfig(windows_definitions, strategies, position_limits)
+deactivate CM
+
+== 2. 异动事件触发时间窗口启动 ==
+
+MAS -> TO: notify_anomaly_detected(anomaly_event)
+activate TO
+
+TO -> TO: initiate_time_window_sequence(anomaly_event)
+note right TO
+  时间窗口序列启动:
+  anomaly_start_time = current_timestamp
+  current_window = "OBSERVATION_PERIOD"
+  window_start_time = anomaly_start_time
+  next_window_transition = anomaly_start_time + 30_seconds
+end note
+
+TO -> LU: log_time_window_initiation(anomaly_event, start_time)
+activate LU
+LU --> TO: window_initiation_logged
+deactivate LU
+
+== 3. 观察确认期 (0-30秒) ==
+
+TO -> TO: enter_observation_period()
+activate TO
+
+TO -> MAS: start_observation_analysis(anomaly_event)
+activate MAS
+
+== 3.1 异动类型识别 ==
+
+MAS -> MAS: analyze_anomaly_characteristics()
+note right MAS
+  异动特征分析:
+  - 异动触发因子: VIX/成交量/价格波动
+  - 异动影响范围: 单一标的/板块/市场
+  - 异动方向性: 上涨/下跌/双向波动
+  - 异动强度评估: 轻度/中度/重度
+  - 持续性预测: 短暂/中等/持续
+end note
+
+MAS -> DAL: collect_comprehensive_market_data()
+activate DAL
+DAL --> MAS: enhanced_market_data(broader_context)
+deactivate DAL
+
+== 3.2 方向性评估 ==
+
+MAS -> MAS: assess_directional_bias()
+note right MAS
+  方向性评估:
+  price_momentum = analyze_price_direction_strength()
+  volume_pattern = analyze_volume_flow_direction()
+  option_flow = analyze_option_order_flow()
+  
+  directional_confidence = {
+      'bullish_probability': calculate_bullish_likelihood(),
+      'bearish_probability': calculate_bearish_likelihood(),
+      'neutral_probability': calculate_neutral_likelihood(),
+      'confidence_level': overall_direction_confidence
+  }
+end note
+
+== 3.3 资源准备 ==
+
+MAS -> OTS: prepare_trading_resources(anomaly_analysis)
+activate OTS
+
+OTS -> OTS: identify_optimal_options()
+OTS -> OTS: prepare_execution_pipeline()
+OTS -> OTS: allocate_capital_for_window()
+
+OTS --> MAS: trading_resources_ready(options_list, capital_allocation)
+deactivate OTS
+
+MAS --> TO: observation_analysis_complete(anomaly_profile, directional_assessment, resources)
+deactivate MAS
+
+TO -> TO: evaluate_observation_results()
+
+alt 异动确认且方向性清晰
+    TO -> TO: prepare_for_golden_entry_period()
+    note right TO: 准备进入黄金入场期
+else 异动不明确或方向性模糊
+    TO -> TO: extend_observation_or_abort()
+    note right TO: 延长观察或放弃此次异动
+end
+
+TO -> TO: wait_for_window_transition(30_seconds)
+deactivate TO
+
+== 4. 黄金入场期 (30-60秒) ==
+
+TO -> TO: enter_golden_entry_period()
+activate TO
+
+TO -> TO: check_golden_entry_conditions()
+note right TO
+  黄金入场条件检查:
+  - 异动持续性确认
+  - 流动性质量评估
+  - IV上升趋势确认  
+  - 市场深度充足性
+  - 执行环境优化
+end note
+
+alt 黄金入场条件满足
+    TO -> OTS: execute_golden_period_strategy(optimal_options, standard_position_size)
+    activate OTS
+    
+    == 4.1 积极入场执行 ==
+    
+    OTS -> OTS: validate_option_liquidity()
+    note right OTS
+      流动性验证:
+      - 买卖价差 < 3%
+      - 订单深度充足
+      - 报价更新频率 > 5/秒
+      - IV曲面稳定性
+    end note
+    
+    OTS -> RMS: request_standard_position_approval(position_size)
+    activate RMS
+    
+    RMS -> RMS: apply_golden_period_risk_rules()
+    note right RMS
+      黄金期风险规则:
+      - 允许标准仓位或加大仓位
+      - 快速通道风险审批
+      - 降低常规限制约束
+      - 优先资源分配
+    end note
+    
+    RMS --> OTS: position_approved(enhanced_limits)
+    deactivate RMS
+    
+    OTS -> OTS: execute_immediate_entry()
+    note right OTS
+      立即入场执行:
+      - 市价单快速成交
+      - 多venue并行下单
+      - 最小化执行延迟
+      - 实时成交监控
+    end note
+    
+    OTS --> TO: golden_entry_executed(position_details, execution_quality)
+    deactivate OTS
+
+else 黄金入场条件不满足
+    TO -> TO: downgrade_to_cautious_strategy()
+    note right TO: 降级为谨慎策略，等待下一窗口
+end
+
+TO -> TO: monitor_golden_period_performance()
+TO -> TO: wait_for_window_transition(60_seconds)
+deactivate TO
+
+== 5. 谨慎入场期 (60-120秒) ==
+
+TO -> TO: enter_cautious_entry_period()
+activate TO
+
+TO -> TO: assess_cautious_entry_viability()
+note right TO
+  谨慎入场评估:
+  - 异动是否接近峰值
+  - IV是否开始稳定
+  - 流动性是否恶化
+  - 风险收益比变化
+  - 持仓管理优先级
+end note
+
+alt 谨慎入场条件满足
+    TO -> OTS: execute_cautious_period_strategy(selected_options, reduced_position_size)
+    activate OTS
+    
+    == 5.1 谨慎入场执行 ==
+    
+    OTS -> OTS: apply_enhanced_entry_criteria()
+    note right OTS
+      谨慎期入场标准:
+      - 提高信号确认要求
+      - 严格流动性筛选
+      - 更保守的风险预算
+      - 更快的止损设置
+    end note
+    
+    OTS -> RMS: request_reduced_position_approval(position_size * 0.5)
+    activate RMS
+    
+    RMS -> RMS: apply_cautious_period_risk_rules()
+    note right RMS
+      谨慎期风险规则:
+      - 仓位减少50%
+      - 更严格的风险限制
+      - 缩短持仓时间目标
+      - 增强监控频率
+    end note
+    
+    RMS --> OTS: reduced_position_approved(conservative_limits)
+    deactivate RMS
+    
+    OTS -> OTS: execute_selective_entry()
+    note right OTS
+      选择性入场:
+      - 限价单优化价格
+      - 分批建仓策略
+      - 严格执行质量控制
+      - 准备快速出场
+    end note
+    
+    OTS --> TO: cautious_entry_executed(position_details, risk_metrics)
+    deactivate OTS
+
+else 谨慎入场风险过高
+    TO -> TO: skip_cautious_entry()
+    note right TO: 跳过谨慎入场，专注持仓管理
+end
+
+TO -> TO: transition_to_position_management_focus()
+TO -> TO: wait_for_window_transition(120_seconds)
+deactivate TO
+
+== 6. 禁止入场期 (120秒+) ==
+
+TO -> TO: enter_position_management_period()
+activate TO
+
+TO -> TO: enforce_no_new_positions_rule()
+note right TO
+  禁止入场规则:
+  - 完全禁止新开仓
+  - 专注现有持仓管理
+  - 准备出场策略
+  - 评估异动后市场状态
+end note
+
+== 6.1 持仓管理专注 ==
+
+TO -> OTS: focus_on_position_management()
+activate OTS
+
+OTS -> OTS: monitor_existing_positions()
+note right OTS
+  持仓管理策略:
+  - 实时PnL监控
+  - Greeks风险评估
+  - 出场时机判断
+  - 部分止盈操作
+end note
+
+OTS -> RMS: assess_position_exit_signals()
+activate RMS
+
+RMS -> RMS: analyze_post_anomaly_market_state()
+note right RMS
+  异动后市场分析:
+  - 异动能量消耗评估
+  - 回调风险评估
+  - 流动性恢复状况
+  - 新均衡价格预测
+end note
+
+RMS --> OTS: exit_recommendations(timing, strategy, urgency)
+deactivate RMS
+
+alt 出场信号触发
+    OTS -> OTS: execute_position_exits()
+    note right OTS
+      出场执行:
+      - 优化出场时机
+      - 最大化已实现收益
+      - 避免流动性陷阱
+      - 保护利润成果
+    end note
+
+else 继续持有
+    OTS -> OTS: maintain_positions_with_enhanced_monitoring()
+    note right OTS: 加强监控，准备随时出场
+end
+
+OTS --> TO: position_management_actions(exits_executed, ongoing_monitoring)
+deactivate OTS
+
+== 6.2 异动周期结束评估 ==
+
+TO -> MAS: evaluate_anomaly_cycle_completion()
+activate MAS
+
+MAS -> MAS: assess_market_return_to_normal()
+note right MAS
+  市场正常化评估:
+  - VIX回归正常水平
+  - 成交量恢复常规倍数
+  - 价格波动降至正常范围
+  - 异动影响完全消化
+end note
+
+alt 市场恢复正常
+    MAS --> TO: anomaly_cycle_completed(market_normalized)
+    TO -> TO: reset_time_window_system()
+    note right TO: 重置时间窗口系统，准备下次异动
+    
+else 市场仍处异动状态
+    MAS --> TO: anomaly_cycle_ongoing(extended_monitoring)
+    TO -> TO: continue_position_management_period()
+    note right TO: 继续禁止入场期，等待市场稳定
+end
+deactivate MAS
+
+deactivate TO
+
+== 7. 时间窗口性能监控 ==
+
+TO -> VU: monitor_time_window_effectiveness()
+activate VU
+
+VU -> VU: analyze_window_transition_accuracy()
+note right VU
+  时间窗口效果分析:
+  - 窗口切换准确性
+  - 各窗口策略执行质量
+  - 时机把握有效性
+  - 整体异动周期收益
+end note
+
+VU -> VU: calculate_window_performance_metrics()
+note right VU
+  窗口绩效指标:
+  - 观察期: 方向判断准确率
+  - 黄金期: 入场执行成功率
+  - 谨慎期: 风险控制有效性
+  - 管理期: 出场时机优化
+end note
+
+VU --> TO: window_performance_analysis(effectiveness_scores, improvement_suggestions)
+deactivate VU
+
+== 8. 窗口策略优化 ==
+
+TO -> CM: optimize_time_window_parameters(performance_feedback)
+activate CM
+
+CM -> CM: adjust_window_durations()
+note right CM
+  窗口参数优化:
+  - 基于市场特征调整窗口时长
+  - 优化窗口切换条件
+  - 改进策略执行逻辑
+  - 增强风险控制机制
+end note
+
+CM -> CM: update_window_strategies()
+CM --> TO: optimized_window_config(new_parameters, enhanced_strategies)
+deactivate CM
+
+TO -> LU: log_time_window_cycle_completion(performance_summary, optimizations)
+activate LU
+LU --> TO: cycle_completion_logged
+deactivate LU
+
+note over TO, LU
+  **验收标准**:
+  ✓ 时间窗口自动切换
+  ✓ 每个窗口执行不同策略
+  ✓ 窗口切换日志记录
+  ✓ 支持窗口参数调整
+end note
+
+@enduml

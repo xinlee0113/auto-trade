@@ -1,0 +1,305 @@
+@startuml REQ-RISK-002 风险限额体系流程时序图
+!theme plain
+
+title REQ-RISK-002: 风险限额体系 - 跨类流程时序图
+
+participant "RiskManagementService" as RMS
+participant "ConfigurationManager" as CM
+participant "RiskCalculationEngine" as RCE
+participant "TradingOrchestrator" as TO
+participant "OptionTradingService" as OTS
+participant "DataAccessLayer" as DAL
+participant "ValidationUtility" as VU
+
+note over RMS, VU
+  **需求**: REQ-RISK-002 风险限额体系
+  **资金管理限额**: 单笔≤2%、同时≤4%、日内≤10%、周≤15%、月≤20%
+  **交易频率限额**: 最小间隔3秒、小时≤20次、日≤100次
+  **连续亏损控制**: 5次后暂停、异动交易日限10次
+end note
+
+== 1. 风险限额体系初始化 ==
+
+RMS -> CM: load_risk_limits_config()
+activate CM
+
+CM -> CM: load_predefined_limits()
+note right CM
+  风险限额配置:
+  - SINGLE_TRADE_MAX: 2% 总资金
+  - CONCURRENT_EXPOSURE_MAX: 4% 总资金
+  - DAILY_RISK_MAX: 10% 总资金
+  - WEEKLY_LOSS_MAX: 15% 总资金
+  - MONTHLY_DRAWDOWN_MAX: 20% 总资金
+  - MIN_TRADE_INTERVAL: 3秒
+  - HOURLY_TRADE_MAX: 20次
+  - DAILY_TRADE_MAX: 100次
+  - CONSECUTIVE_LOSS_LIMIT: 5次
+  - ANOMALY_DAILY_LIMIT: 10次
+end note
+
+CM --> RMS: RiskLimitsConfig(fund_limits, frequency_limits, loss_limits)
+deactivate CM
+
+RMS -> RCE: initialize_limits_monitoring()
+activate RCE
+
+RCE -> RCE: setup_limit_trackers()
+note right RCE
+  限额追踪器初始化:
+  - fund_usage_tracker: 实时资金使用监控
+  - trade_frequency_tracker: 交易频率计数器
+  - loss_streak_tracker: 连续亏损计数器
+  - exposure_calculator: 风险敞口计算器
+end note
+
+RCE --> RMS: limits_monitoring_initialized
+deactivate RCE
+
+== 2. 交易前限额检查 ==
+
+TO -> RMS: check_pre_trade_limits(trade_request)
+activate RMS
+
+== 2.1 资金管理限额检查 ==
+
+RMS -> RCE: validate_fund_limits(trade_size, account_size)
+activate RCE
+
+RCE -> DAL: get_current_positions()
+activate DAL
+DAL --> RCE: current_positions[]
+deactivate DAL
+
+RCE -> RCE: calculate_current_exposure()
+note right RCE
+  当前风险敞口计算:
+  total_exposure = sum(position.market_value for position in positions)
+  daily_used = sum(today_trades.risk_amount)
+  weekly_used = sum(week_trades.risk_amount)
+  monthly_used = sum(month_trades.risk_amount)
+end note
+
+RCE -> RCE: validate_single_trade_limit()
+note right RCE
+  单笔交易限额检查:
+  single_trade_limit = account_size * 0.02
+  if trade_size > single_trade_limit:
+      return REJECTED("单笔交易超限")
+end note
+
+RCE -> RCE: validate_concurrent_exposure_limit()
+note right RCE
+  同时持仓限额检查:
+  new_total_exposure = total_exposure + trade_size
+  concurrent_limit = account_size * 0.04
+  if new_total_exposure > concurrent_limit:
+      return REJECTED("同时持仓超限")
+end note
+
+RCE -> RCE: validate_daily_risk_limit()
+note right RCE
+  日内累计风险检查:
+  new_daily_risk = daily_used + trade_size
+  daily_limit = account_size * 0.10
+  if new_daily_risk > daily_limit:
+      return REJECTED("日内风险超限")
+end note
+
+alt 资金限额检查通过
+    RCE --> RMS: fund_limits_passed(remaining_capacity)
+else 资金限额超限
+    RCE --> RMS: fund_limits_exceeded(limit_type, used_amount, limit_amount)
+    RMS --> TO: trade_rejected("资金限额超限", details)
+    deactivate RCE
+    deactivate RMS
+    note right TO: 交易被拒绝
+    return
+end
+deactivate RCE
+
+== 2.2 交易频率限额检查 ==
+
+RMS -> RCE: validate_frequency_limits(trade_timestamp)
+activate RCE
+
+RCE -> RCE: check_minimum_interval()
+note right RCE
+  最小交易间隔检查:
+  time_since_last = current_time - last_trade_time
+  if time_since_last < 3_seconds:
+      return REJECTED("交易间隔不足")
+end note
+
+RCE -> RCE: check_hourly_trade_count()
+note right RCE
+  小时交易次数检查:
+  current_hour_trades = count_trades_in_current_hour()
+  if current_hour_trades >= 20:
+      return REJECTED("小时交易次数超限")
+end note
+
+RCE -> RCE: check_daily_trade_count()
+note right RCE
+  日交易次数检查:
+  today_trades = count_trades_today()
+  if today_trades >= 100:
+      return REJECTED("日交易次数超限")
+end note
+
+alt 频率限额检查通过
+    RCE --> RMS: frequency_limits_passed
+else 频率限额超限
+    RCE --> RMS: frequency_limits_exceeded(limit_type, current_count, max_count)
+    RMS --> TO: trade_rejected("交易频率超限", details)
+    deactivate RCE
+    deactivate RMS
+    return
+end
+deactivate RCE
+
+== 2.3 连续亏损限额检查 ==
+
+RMS -> RCE: validate_loss_streak_limits()
+activate RCE
+
+RCE -> DAL: get_recent_trade_results()
+activate DAL
+DAL --> RCE: recent_trades_pnl[]
+deactivate DAL
+
+RCE -> RCE: calculate_consecutive_losses()
+note right RCE
+  连续亏损计算:
+  consecutive_losses = 0
+  for trade in reversed(recent_trades):
+      if trade.pnl < 0:
+          consecutive_losses += 1
+      else:
+          break
+end note
+
+alt 连续亏损 < 5次
+    RCE --> RMS: loss_streak_acceptable(consecutive_losses)
+else 连续亏损 ≥ 5次
+    RCE --> RMS: consecutive_loss_limit_exceeded(consecutive_losses)
+    RMS -> RMS: activate_trading_pause()
+    RMS --> TO: trading_paused("连续亏损超限", pause_duration="1小时")
+    deactivate RCE
+    deactivate RMS
+    return
+end
+deactivate RCE
+
+RMS --> TO: all_limits_passed(trade_approved)
+deactivate RMS
+
+== 3. 交易执行后限额更新 ==
+
+TO -> OTS: execute_approved_trade(trade_request)
+activate OTS
+OTS --> TO: trade_executed(trade_result)
+deactivate OTS
+
+TO -> RMS: update_limits_usage(trade_result)
+activate RMS
+
+RMS -> RCE: record_trade_execution(trade_result)
+activate RCE
+
+RCE -> RCE: update_fund_usage_tracker()
+RCE -> RCE: update_frequency_tracker()
+RCE -> RCE: update_loss_streak_tracker()
+
+RCE -> DAL: persist_trade_limits_data(usage_data)
+activate DAL
+DAL --> RCE: data_persisted
+deactivate DAL
+
+RCE --> RMS: limits_updated
+deactivate RCE
+
+== 4. 实时限额监控和告警 ==
+
+loop 实时监控
+    RMS -> RCE: monitor_limit_usage()
+    activate RCE
+    
+    RCE -> RCE: calculate_usage_percentages()
+    note right RCE
+      使用率计算:
+      fund_usage_pct = total_exposure / total_account * 100
+      daily_usage_pct = daily_used / daily_limit * 100
+      weekly_usage_pct = weekly_used / weekly_limit * 100
+      frequency_usage_pct = hourly_trades / hourly_limit * 100
+    end note
+    
+    alt 使用率 > 80%
+        RCE --> RMS: usage_warning(limit_type, usage_pct, remaining_capacity)
+        
+        RMS -> VU: validate_warning_threshold(limit_type, usage_pct)
+        activate VU
+        VU --> RMS: warning_confirmed
+        deactivate VU
+        
+        RMS -> TO: limit_usage_alert(warning_level, recommended_action)
+        
+    else 使用率 > 95%
+        RCE --> RMS: usage_critical(limit_type, usage_pct)
+        
+        RMS -> TO: critical_limit_alert(limit_type, "接近限额上限")
+        
+    else 使用率正常
+        RCE --> RMS: usage_normal
+    end
+    deactivate RCE
+end
+
+== 5. 限额重置和维护 ==
+
+par 日限额重置
+    RMS -> RCE: reset_daily_limits()
+    activate RCE
+    RCE -> RCE: clear_daily_counters()
+    RCE -> DAL: archive_daily_data()
+    activate DAL
+    DAL --> RCE: daily_data_archived
+    deactivate DAL
+    RCE --> RMS: daily_limits_reset
+    deactivate RCE
+
+else 周限额重置
+    RMS -> RCE: reset_weekly_limits()
+    activate RCE
+    RCE -> RCE: clear_weekly_counters()
+    RCE -> DAL: archive_weekly_data()
+    activate DAL
+    DAL --> RCE: weekly_data_archived
+    deactivate DAL
+    RCE --> RMS: weekly_limits_reset
+    deactivate RCE
+
+else 月限额重置
+    RMS -> RCE: reset_monthly_limits()
+    activate RCE
+    RCE -> RCE: clear_monthly_counters()
+    RCE -> DAL: archive_monthly_data()
+    activate DAL
+    DAL --> RCE: monthly_data_archived
+    deactivate DAL
+    RCE --> RMS: monthly_limits_reset
+    deactivate RCE
+end
+
+RMS --> TO: limit_system_maintained
+deactivate RMS
+
+note over RMS, VU
+  **验收标准**:
+  ✓ 限额检查准确率100%
+  ✓ 超限自动阻止交易
+  ✓ 限额使用率实时显示
+  ✓ 支持限额参数动态调整
+end note
+
+@enduml

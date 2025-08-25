@@ -1,0 +1,210 @@
+@startuml REQ-TECH-002 多层信号确认体系流程时序图
+!theme plain
+
+title REQ-TECH-002: 多层信号确认体系 - 跨类流程时序图
+
+participant "MarketAnalysisService" as MAS
+participant "TechnicalAnalysisEngine" as TAE
+participant "DataAccessLayer" as DAL
+participant "GreeksCalculationEngine" as GCE
+participant "ValidationUtility" as VU
+participant "ConfigurationManager" as CM
+
+note over MAS, CM
+  **需求**: REQ-TECH-002 多层信号确认体系
+  **Layer 1**: 标的动量确认 (权重30%)
+  **Layer 2**: 成交量与价格确认 (权重25%)
+  **Layer 3**: 微观结构确认 (权重20%)  
+  **Layer 4**: 期权特定确认 (权重25%)
+end note
+
+== 1. 信号确认流程启动 ==
+
+MAS -> CM: get_signal_weights()
+activate CM
+CM --> MAS: weights(layer1=0.30, layer2=0.25, layer3=0.20, layer4=0.25)
+deactivate CM
+
+MAS -> DAL: get_comprehensive_market_data(symbol)
+activate DAL
+DAL --> MAS: market_data(price, volume, quotes, options)
+deactivate DAL
+
+== 2. Layer 1: 标的动量确认 (权重30%) ==
+
+MAS -> TAE: analyze_momentum_vector(market_data)
+activate TAE
+
+TAE -> TAE: calculate_momentum_10s()
+TAE -> TAE: calculate_momentum_30s() 
+TAE -> TAE: calculate_momentum_1m()
+
+TAE -> TAE: check_momentum_consistency()
+note right TAE
+  momentum_vector = {
+    '10s': (price_now - price_10s) / price_10s,
+    '30s': (price_now - price_30s) / price_30s,
+    '1m': (price_now - price_1m) / price_1m
+  }
+  
+  consistency = all([
+    abs(momentum_10s) > 0.001,
+    abs(momentum_30s) > 0.0015, 
+    abs(momentum_1m) > 0.002,
+    same_direction(all_momentum)
+  ])
+end note
+
+TAE --> MAS: layer1_score(momentum_strength, consistency, direction)
+deactivate TAE
+
+== 3. Layer 2: 成交量与价格确认 (权重25%) ==
+
+MAS -> TAE: analyze_volume_price_relationship(market_data)
+activate TAE
+
+TAE -> TAE: calculate_volume_price_divergence()
+note right TAE
+  volume_analysis = {
+    'volume_spike': current_volume / avg_volume_5m > 1.5,
+    'price_volume_sync': correlation(price_changes, volume_changes) > 0.6,
+    'large_trade_ratio': large_trades_volume / total_volume > 0.3
+  }
+end note
+
+TAE -> TAE: analyze_order_flow_pressure()
+note right TAE
+  order_flow = {
+    'buy_pressure': aggressive_buys / total_trades > 0.55,
+    'sell_pressure': aggressive_sells / total_trades > 0.55
+  }
+end note
+
+TAE --> MAS: layer2_score(volume_spike, sync_level, flow_pressure)
+deactivate TAE
+
+== 4. Layer 3: 微观结构确认 (权重20%) ==
+
+MAS -> VU: analyze_microstructure_quality(market_data)
+activate VU
+
+VU -> VU: assess_spread_quality()
+note right VU
+  spread_quality = {
+    'tight_spread': (ask - bid) / mid_price < 0.01,
+    'depth_ratio': (bid_size + ask_size) / avg_depth > 0.8,
+    'quote_stability': quote_update_frequency < 10/sec
+  }
+end note
+
+VU -> TAE: get_ema_cross_strength()
+activate TAE
+TAE --> VU: ema_cross_data(magnitude, slope_change, persistence)
+deactivate TAE
+
+VU --> MAS: layer3_score(spread_quality, depth_quality, ema_strength)
+deactivate VU
+
+== 5. Layer 4: 期权特定确认 (权重25%) ==
+
+MAS -> GCE: analyze_option_environment(option_data)
+activate GCE
+
+GCE -> GCE: assess_option_liquidity()
+note right GCE
+  option_liquidity = {
+    'bid_ask_spread': (option_ask - option_bid) / option_mid < 0.05,
+    'volume_threshold': option_volume_1m > 50,
+    'oi_threshold': open_interest > 100,
+    'quote_frequency': quotes_per_minute > 20
+  }
+end note
+
+GCE -> GCE: analyze_iv_environment()
+note right GCE
+  iv_environment = {
+    'iv_level': 0.1 < current_iv < 0.8,
+    'iv_stability': abs(iv_change_1m) < 0.1,
+    'iv_skew_normal': abs(iv_call - iv_put) < 0.05
+  }
+end note
+
+GCE --> MAS: layer4_score(liquidity_score, iv_score, greeks_quality)
+deactivate GCE
+
+== 6. 信号综合评分和决策 ==
+
+MAS -> MAS: calculate_composite_signal_score()
+note right MAS
+  composite_score = (
+    layer1_score * 0.30 +
+    layer2_score * 0.25 + 
+    layer3_score * 0.20 +
+    layer4_score * 0.25
+  )
+  
+  confidence = min(layer_scores) / max(layer_scores)
+  signal_strength = composite_score / 100
+end note
+
+alt composite_score >= 80 AND confidence >= 0.7
+    MAS -> MAS: generate_strong_signal()
+    note right MAS
+      signal = TradingSignal(
+        type="STRONG_BUY/SELL",
+        strength=signal_strength,
+        confidence=confidence,
+        layer_breakdown={...},
+        timestamp=now()
+      )
+    end note
+    
+else composite_score >= 60 AND confidence >= 0.5
+    MAS -> MAS: generate_moderate_signal()
+    note right MAS
+      signal = TradingSignal(
+        type="MODERATE_BUY/SELL", 
+        strength=signal_strength,
+        confidence=confidence,
+        layer_breakdown={...},
+        timestamp=now()
+      )
+    end note
+    
+else
+    MAS -> MAS: reject_signal()
+    note right MAS
+      reason = "Insufficient score or confidence"
+      log_rejection(composite_score, confidence, layer_breakdown)
+    end note
+end
+
+== 7. 信号验证和记录 ==
+
+MAS -> VU: validate_signal_logic(signal, market_context)
+activate VU
+
+VU -> VU: check_signal_consistency()
+VU -> VU: verify_risk_parameters()
+VU -> VU: validate_timing_constraints()
+
+VU --> MAS: validation_result(passed, warnings)
+deactivate VU
+
+alt 验证通过
+    MAS -> MAS: log_signal_generation()
+    MAS -> MAS: update_signal_statistics()
+else 验证失败
+    MAS -> MAS: log_signal_rejection()
+    MAS -> MAS: update_failure_statistics()
+end
+
+note over MAS, CM
+  **验收标准**:
+  ✓ 信号确认准确率≥80%
+  ✓ 信号生成延迟<2秒
+  ✓ 支持权重动态调整
+  ✓ 详细记录各层评分过程
+end note
+
+@enduml

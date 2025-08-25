@@ -1,0 +1,210 @@
+@startuml 0DTE期权高频交易系统架构
+!theme plain
+
+title 0DTE期权高频交易系统 - 严格分层架构设计
+
+package "表示层 (Presentation Layer)" as PresentationLayer #LightBlue {
+    class MainApplication {
+        + 系统启动入口
+        + 用户交互界面
+        + 系统状态显示
+    }
+    
+    class CommandLineInterface {
+        + 命令行操作
+        + 参数配置
+        + 系统控制
+    }
+}
+
+package "应用服务层 (Application Service Layer)" as ApplicationLayer #LightGreen {
+    class TradingOrchestrator {
+        + orchestrate_trading_workflow()
+        + coordinate_services()
+        + handle_business_exceptions()
+    }
+    
+    class SystemController {
+        + start_system()
+        + stop_system()
+        + monitor_health()
+    }
+}
+
+package "领域服务层 (Domain Service Layer)" as DomainLayer #LightYellow {
+    class MarketAnalysisService {
+        + analyze_market_conditions()
+        + detect_trading_opportunities()
+        + generate_market_signals()
+    }
+    
+    class OptionTradingService {
+        + select_optimal_options()
+        + calculate_option_strategies()
+        + execute_option_trades()
+    }
+    
+    class RiskManagementService {
+        + assess_portfolio_risk()
+        + enforce_risk_limits()
+        + generate_risk_alerts()
+    }
+}
+
+package "基础设施层 (Infrastructure Layer)" as InfrastructureLayer #LightCoral {
+    class DataAccessLayer {
+        + 实时数据获取
+        + 历史数据查询
+        + 数据持久化
+    }
+    
+    class ExternalAPIAdapter {
+        + Tiger API适配
+        + 第三方数据源
+        + API限流控制
+    }
+    
+    class CacheRepository {
+        + 内存缓存
+        + 数据缓存策略
+        + 缓存失效管理
+    }
+}
+
+package "计算引擎层 (Calculation Engine Layer)" as CalculationLayer #Lavender {
+    class GreeksCalculationEngine {
+        + Black-Scholes模型
+        + Greeks实时计算
+        + 期权定价模型
+    }
+    
+    class TechnicalAnalysisEngine {
+        + 技术指标计算
+        + 趋势分析算法
+        + 信号生成逻辑
+    }
+    
+    class RiskCalculationEngine {
+        + VaR计算
+        + 压力测试
+        + 风险指标计算
+    }
+}
+
+package "数据模型层 (Data Model Layer)" as ModelLayer #LightGray {
+    class DomainModels {
+        + Position
+        + MarketData
+        + TradingSignal
+        + RiskMetrics
+    }
+    
+    class ValueObjects {
+        + OptionTickData
+        + GreeksData
+        + PriceData
+        + VolumeData
+    }
+    
+    class Entities {
+        + Trading Account
+        + Option Contract
+        + Market Session
+    }
+}
+
+package "配置层 (Configuration Layer)" as ConfigLayer #Wheat {
+    class ConfigurationManager {
+        + 交易参数配置
+        + 系统环境配置
+        + 风险阈值配置
+    }
+    
+    class ConstantsDefinition {
+        + 业务常量
+        + 计算参数
+        + 枚举定义
+    }
+}
+
+package "工具层 (Utility Layer)" as UtilityLayer #MistyRose {
+    class LoggingUtility {
+        + 日志记录
+        + 错误追踪
+        + 性能监控
+    }
+    
+    class ValidationUtility {
+        + 数据验证
+        + 参数检查
+        + 业务规则验证
+    }
+    
+    class SecurityUtility {
+        + 安全认证
+        + 数据加密
+        + 访问控制
+    }
+}
+
+' 严格的向下依赖关系 - 上层只能依赖下层
+PresentationLayer --|> ApplicationLayer : 依赖
+ApplicationLayer --|> DomainLayer : 依赖
+DomainLayer --|> InfrastructureLayer : 依赖
+DomainLayer --|> CalculationLayer : 依赖
+InfrastructureLayer --|> ModelLayer : 依赖
+CalculationLayer --|> ModelLayer : 依赖
+
+' 横向依赖 - 同层级之间不直接依赖
+ConfigLayer -.-> DomainLayer : 配置注入
+UtilityLayer -.-> DomainLayer : 工具支持
+UtilityLayer -.-> InfrastructureLayer : 工具支持
+UtilityLayer -.-> CalculationLayer : 工具支持
+
+note top of PresentationLayer
+  **职责**: 用户交互、系统控制入口
+  **依赖**: 仅依赖应用服务层
+  **原则**: 薄层设计，不包含业务逻辑
+end note
+
+note top of ApplicationLayer
+  **职责**: 业务流程编排、服务协调
+  **依赖**: 仅依赖领域服务层
+  **原则**: 无状态、事务边界管理
+end note
+
+note top of DomainLayer
+  **职责**: 核心业务逻辑、领域规则
+  **依赖**: 基础设施层、计算引擎层
+  **原则**: 高内聚、低耦合、业务完整性
+end note
+
+note top of InfrastructureLayer
+  **职责**: 外部资源访问、技术实现
+  **依赖**: 仅依赖数据模型层
+  **原则**: 技术细节封装、接口抽象
+end note
+
+note top of CalculationLayer
+  **职责**: 数学计算、算法实现
+  **依赖**: 仅依赖数据模型层
+  **原则**: 纯函数、高性能、无副作用
+end note
+
+note bottom of ModelLayer
+  **职责**: 数据结构定义、业务实体
+  **依赖**: 无外部依赖（最底层）
+  **原则**: 不可变性、类型安全、领域表达
+end note
+
+note right of ConfigLayer
+  **职责**: 配置管理、参数注入
+  **特点**: 横向支持，配置驱动
+end note
+
+note right of UtilityLayer
+  **职责**: 通用工具、基础服务
+  **特点**: 横向支持，无状态工具
+end note
+
+@enduml

@@ -1,0 +1,155 @@
+@startuml 双轨制交易系统流程时序图
+!theme plain
+
+title REQ-BIZ-001: 双轨制交易系统 - 跨类流程时序图
+
+actor User as U
+participant "MainApplication" as MA
+participant "TradingOrchestrator" as TO
+participant "MarketAnalysisService" as MAS
+participant "OptionTradingService" as OTS
+participant "RiskManagementService" as RMS
+participant "DataAccessLayer" as DAL
+participant "TechnicalAnalysisEngine" as TAE
+participant "ConfigurationManager" as CM
+
+note over U, CM
+  **业务场景**: 双轨制交易系统启动和运行
+  **常规轨道**: 80%资金分配，稳定收益
+  **异动轨道**: 20%资金分配，爆发收益
+end note
+
+== 系统初始化阶段 ==
+
+U -> MA: start_trading()
+activate MA
+
+MA -> TO: orchestrate_trading_workflow()
+activate TO
+
+TO -> CM: get_trading_config()
+activate CM
+CM --> TO: TradingConfig(regular_ratio=0.8, anomaly_ratio=0.2)
+deactivate CM
+
+TO -> RMS: enforce_risk_limits()
+activate RMS
+RMS --> TO: risk_check_passed
+deactivate RMS
+
+== 双轨道并行启动 ==
+
+par 常规交易轨道 (80%资金)
+    TO -> MAS: analyze_market_conditions()
+    activate MAS
+    
+    MAS -> DAL: get_real_time_data(symbols)
+    activate DAL
+    DAL --> MAS: MarketData[]
+    deactivate DAL
+    
+    MAS -> TAE: calculate_technical_indicators(market_data)
+    activate TAE
+    TAE --> MAS: TechnicalIndicators
+    deactivate TAE
+    
+    MAS --> TO: RegularSignal(strength=0.7, confidence=0.8)
+    deactivate MAS
+    
+    TO -> OTS: execute_option_trades(signal, fund_ratio=0.8)
+    activate OTS
+    OTS --> TO: Position(track="regular", value=80000)
+    deactivate OTS
+
+else 异动交易轨道 (20%资金)
+    TO -> MAS: detect_trading_opportunities()
+    activate MAS
+    
+    MAS -> DAL: get_real_time_data(symbols)
+    activate DAL
+    DAL --> MAS: MarketData[]
+    deactivate DAL
+    
+    alt 无异动检测
+        MAS --> TO: NoAnomalySignal
+        deactivate MAS
+    else 检测到异动
+        MAS --> TO: AnomalySignal(level=2, strength=0.9)
+        deactivate MAS
+        
+        note over TO
+          **轨道协调机制**:
+          1. 暂停常规轨道新开仓
+          2. 加强现有持仓监控
+          3. 启动异动轨道评估
+        end note
+        
+        TO -> OTS: pause_regular_track()
+        activate OTS
+        OTS --> TO: regular_track_paused
+        deactivate OTS
+        
+        TO -> OTS: execute_option_trades(anomaly_signal, fund_ratio=0.2)
+        activate OTS
+        OTS --> TO: Position(track="anomaly", value=20000)
+        deactivate OTS
+    end
+end
+
+== 持续监控和协调 ==
+
+loop 实时监控
+    TO -> RMS: assess_portfolio_risk()
+    activate RMS
+    RMS --> TO: RiskMetrics(total_exposure=100000)
+    deactivate RMS
+    
+    alt 异动结束
+        TO -> MAS: check_anomaly_status()
+        activate MAS
+        MAS --> TO: AnomalyEnded
+        deactivate MAS
+        
+        TO -> OTS: resume_regular_track()
+        activate OTS
+        OTS --> TO: regular_track_resumed
+        deactivate OTS
+    end
+    
+    TO -> RMS: generate_risk_alerts()
+    activate RMS
+    alt 风险超限
+        RMS --> TO: RiskAlert(level="HIGH", action="REDUCE_POSITION")
+        TO -> OTS: reduce_positions()
+        activate OTS
+        OTS --> TO: positions_reduced
+        deactivate OTS
+    else 风险正常
+        RMS --> TO: RiskOK
+    end
+    deactivate RMS
+end
+
+== 系统关闭 ==
+
+U -> MA: shutdown_system()
+TO -> OTS: close_all_positions()
+activate OTS
+OTS --> TO: all_positions_closed
+deactivate OTS
+
+TO --> MA: trading_workflow_completed
+deactivate TO
+
+MA --> U: system_shutdown_complete
+deactivate MA
+
+note over U, CM
+  **验收标准**:
+  ✓ 双轨道独立运行
+  ✓ 资金分配80%/20%
+  ✓ 异动检测自动暂停常规轨道
+  ✓ 异动结束自动恢复常规轨道
+end note
+
+@enduml

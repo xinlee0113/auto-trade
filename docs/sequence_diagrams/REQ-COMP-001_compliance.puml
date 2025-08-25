@@ -1,0 +1,573 @@
+@startuml REQ-COMP-001 监管合规流程时序图
+!theme plain
+
+title REQ-COMP-001: 监管合规 - 跨类流程时序图
+
+participant "OptionTradingService" as OTS
+participant "RiskManagementService" as RMS
+participant "DataAccessLayer" as DAL
+participant "ValidationUtility" as VU
+participant "LoggingUtility" as LU
+participant "ConfigurationManager" as CM
+participant "SystemController" as SC
+participant "ExternalAPIAdapter" as EAA
+
+note over OTS, EAA
+  **需求**: REQ-COMP-001 监管合规
+  **交易记录要求**: 完整交易日志、决策过程记录、风险评估记录、异常事件记录
+  **风险披露要求**: 策略风险说明、最大亏损分析、市场模型风险提示、技术操作风险
+  **合规标准**: 记录格式符合监管、完整可追溯、风险披露准确及时、监管报告自动生成
+end note
+
+== 1. 合规体系初始化 ==
+
+SC -> CM: initialize_compliance_system()
+activate CM
+
+CM -> CM: load_regulatory_requirements()
+note right CM
+  监管合规配置:
+  
+  **交易记录要求**:
+  - 交易执行完整记录 (入场/出场/原因)
+  - 决策过程详细日志
+  - 风险评估计算过程
+  - 异常事件处理记录
+  - 系统操作审计日志
+  
+  **记录保留要求**:
+  - 交易记录: 保留7年
+  - 决策日志: 保留5年
+  - 风险评估: 保留3年
+  - 系统日志: 保留1年
+  
+  **报告要求**:
+  - 日交易报告
+  - 月度风险报告
+  - 季度合规报告
+  - 年度审计报告
+  
+  **数据格式要求**:
+  - 标准化字段定义
+  - 时间戳精确到毫秒
+  - 唯一标识符规范
+  - 数据完整性校验
+end note
+
+CM --> SC: ComplianceConfig(recording_requirements, retention_policies, reporting_schedules)
+deactivate CM
+
+SC -> DAL: setup_compliance_data_infrastructure()
+activate DAL
+
+DAL -> DAL: create_regulatory_compliant_schemas()
+note right DAL
+  合规数据结构:
+  
+  **交易记录表**:
+  - 交易ID (唯一标识)
+  - 时间戳 (精确到毫秒)
+  - 标的证券信息
+  - 期权合约详情
+  - 交易数量和价格
+  - 交易类型 (开仓/平仓)
+  - 执行场所
+  - 交易员/系统标识
+  
+  **决策记录表**:
+  - 决策ID
+  - 关联交易ID
+  - 信号生成时间
+  - 决策依据和算法
+  - 风险评估结果
+  - 审批流程记录
+  
+  **风险记录表**:
+  - 风险评估ID
+  - 评估时间戳
+  - 风险类型分类
+  - 风险度量值
+  - 缓解措施
+  - 责任人员
+end note
+
+DAL --> SC: compliance_data_infrastructure_ready
+deactivate DAL
+
+== 2. 交易记录合规处理 ==
+
+OTS -> OTS: execute_compliant_trade(trade_order)
+activate OTS
+
+== 2.1 交易前合规检查 ==
+
+OTS -> VU: validate_pre_trade_compliance(trade_order)
+activate VU
+
+VU -> VU: check_regulatory_constraints()
+note right VU
+  交易前合规检查:
+  - 交易时间限制 (市场开放时间)
+  - 头寸限制合规 (监管头寸限额)
+  - 客户适当性检查
+  - 市场操纵风险评估
+  - 内幕交易风险检查
+  - 最佳执行义务确认
+end note
+
+VU -> LU: log_pre_trade_compliance_check(check_results)
+activate LU
+LU --> VU: compliance_check_logged
+deactivate LU
+
+alt 合规检查通过
+    VU --> OTS: pre_trade_compliance_passed(check_id)
+else 合规检查失败
+    VU --> OTS: pre_trade_compliance_failed(violation_details)
+    OTS -> LU: log_compliance_violation(violation_details)
+    activate LU
+    LU --> OTS: violation_logged
+    deactivate LU
+    OTS -> OTS: reject_trade_order()
+    deactivate VU
+    deactivate OTS
+    return
+end
+deactivate VU
+
+== 2.2 交易执行记录 ==
+
+OTS -> EAA: execute_trade_with_compliance_tracking(trade_order)
+activate EAA
+
+EAA -> EAA: execute_trade_order()
+EAA -> EAA: capture_execution_details()
+
+EAA --> OTS: execution_result(trade_details, execution_report)
+deactivate EAA
+
+OTS -> LU: record_compliant_trade_execution(trade_details)
+activate LU
+
+LU -> LU: create_regulatory_trade_record()
+note right LU
+  交易记录内容:
+  trade_record = {
+      'trade_id': generate_unique_trade_id(),
+      'timestamp': precise_timestamp_ms(),
+      'underlying_symbol': trade.underlying,
+      'option_contract': trade.option_details,
+      'trade_type': trade.direction,  # BUY/SELL
+      'quantity': trade.quantity,
+      'price': trade.execution_price,
+      'venue': trade.execution_venue,
+      'order_type': trade.order_type,
+      'execution_quality': trade.execution_metrics,
+      'trader_id': 'ALGO_SYSTEM_001',
+      'strategy_id': trade.strategy_identifier,
+      'parent_order_id': trade.parent_order_ref,
+      'regulatory_flags': trade.compliance_flags
+  }
+end note
+
+LU -> DAL: store_regulatory_trade_record(trade_record)
+activate DAL
+DAL --> LU: trade_record_stored(record_id)
+deactivate DAL
+
+LU --> OTS: trade_execution_recorded(record_id)
+deactivate LU
+
+== 2.3 决策过程记录 ==
+
+OTS -> LU: record_trading_decision_process(decision_context)
+activate LU
+
+LU -> LU: document_decision_rationale()
+note right LU
+  决策过程记录:
+  decision_record = {
+      'decision_id': generate_decision_id(),
+      'related_trade_id': trade_record.trade_id,
+      'signal_generation_time': signal.timestamp,
+      'signal_type': signal.classification,
+      'signal_strength': signal.confidence_score,
+      'market_conditions': signal.market_context,
+      'technical_indicators': signal.technical_factors,
+      'risk_assessment': signal.risk_evaluation,
+      'decision_algorithm': signal.algorithm_version,
+      'override_flags': decision.manual_overrides,
+      'approval_chain': decision.approval_sequence,
+      'decision_latency': decision_time - signal_time
+  }
+end note
+
+LU -> DAL: store_decision_record(decision_record)
+activate DAL
+DAL --> LU: decision_record_stored
+deactivate DAL
+
+LU --> OTS: decision_process_recorded
+deactivate LU
+
+deactivate OTS
+
+== 3. 风险评估合规记录 ==
+
+RMS -> RMS: perform_compliant_risk_assessment(portfolio_state)
+activate RMS
+
+== 3.1 风险计算过程记录 ==
+
+RMS -> LU: record_risk_calculation_process(risk_context)
+activate LU
+
+LU -> LU: document_risk_assessment_methodology()
+note right LU
+  风险评估记录:
+  risk_record = {
+      'risk_assessment_id': generate_risk_id(),
+      'assessment_timestamp': current_timestamp(),
+      'portfolio_snapshot': portfolio.current_state,
+      'risk_calculation_method': risk.methodology,
+      'input_parameters': risk.calculation_inputs,
+      'market_data_sources': risk.data_sources,
+      'volatility_models': risk.volatility_assumptions,
+      'correlation_matrices': risk.correlation_data,
+      'stress_test_scenarios': risk.stress_scenarios,
+      'var_calculation': risk.var_methodology,
+      'monte_carlo_settings': risk.simulation_parameters,
+      'confidence_intervals': risk.confidence_levels,
+      'risk_limits_checked': risk.limit_validations,
+      'risk_mitigation_actions': risk.mitigation_measures
+  }
+end note
+
+LU -> DAL: store_risk_assessment_record(risk_record)
+activate DAL
+DAL --> LU: risk_record_stored
+deactivate DAL
+
+LU --> RMS: risk_assessment_recorded
+deactivate LU
+
+== 3.2 风险限额合规监控 ==
+
+RMS -> VU: monitor_risk_limit_compliance(current_risk_metrics)
+activate VU
+
+VU -> VU: validate_regulatory_risk_limits()
+note right VU
+  监管风险限额检查:
+  - 净资本要求合规
+  - 集中度风险限制
+  - 流动性风险管理
+  - 市场风险限额
+  - 信用风险敞口
+  - 操作风险控制
+end note
+
+alt 风险限额合规
+    VU -> LU: log_risk_compliance_status(compliant=True)
+    activate LU
+    LU --> VU: compliance_status_logged
+    deactivate LU
+else 风险限额违规
+    VU -> LU: log_risk_limit_violation(violation_details)
+    activate LU
+    LU -> LU: trigger_regulatory_violation_alert()
+    LU --> VU: violation_logged_and_alerted
+    deactivate LU
+    
+    VU -> RMS: require_immediate_risk_mitigation(violation_details)
+end
+
+VU --> RMS: risk_limit_compliance_monitored
+deactivate VU
+
+deactivate RMS
+
+== 4. 异常事件合规处理 ==
+
+SC -> SC: handle_exceptional_event(event_type, event_details)
+activate SC
+
+== 4.1 异常事件分类和记录 ==
+
+SC -> VU: classify_exceptional_event(event_details)
+activate VU
+
+VU -> VU: determine_regulatory_significance()
+note right VU
+  异常事件分类:
+  
+  **系统异常**:
+  - 交易系统故障
+  - 数据馈送中断
+  - 网络连接问题
+  - 算法执行错误
+  
+  **市场异常**:
+  - 极端价格波动
+  - 流动性枯竭
+  - 交易暂停
+  - 熔断机制触发
+  
+  **操作异常**:
+  - 手动干预
+  - 紧急止损
+  - 限额违规
+  - 合规违反
+  
+  监管报告要求:
+  - 重大异常: 立即报告
+  - 一般异常: 日报包含
+  - 轻微异常: 内部记录
+end note
+
+VU --> SC: event_classification(severity, regulatory_impact, reporting_requirement)
+deactivate VU
+
+SC -> LU: record_exceptional_event(event_classification, detailed_context)
+activate LU
+
+LU -> LU: create_comprehensive_event_record()
+note right LU
+  异常事件记录:
+  event_record = {
+      'event_id': generate_event_id(),
+      'event_timestamp': event.occurrence_time,
+      'event_type': event.classification,
+      'severity_level': event.severity,
+      'affected_systems': event.system_impact,
+      'affected_positions': event.trading_impact,
+      'market_conditions': event.market_context,
+      'trigger_conditions': event.cause_analysis,
+      'immediate_actions': event.response_actions,
+      'stakeholders_notified': event.notification_list,
+      'resolution_timeline': event.resolution_plan,
+      'lessons_learned': event.post_analysis,
+      'regulatory_notifications': event.compliance_actions
+  }
+end note
+
+LU -> DAL: store_exceptional_event_record(event_record)
+activate DAL
+DAL --> LU: event_record_stored
+deactivate DAL
+
+== 4.2 监管通知义务 ==
+
+alt 重大异常事件
+    LU -> LU: prepare_immediate_regulatory_notification()
+    note right LU
+      监管立即通知:
+      - 事件发生后1小时内通知
+      - 初步影响评估
+      - 采取的紧急措施
+      - 预计恢复时间
+      - 后续报告计划
+    end note
+    
+    LU -> EAA: send_regulatory_notification(notification_content)
+    activate EAA
+    EAA --> LU: notification_sent(confirmation_id)
+    deactivate EAA
+end
+
+LU --> SC: exceptional_event_recorded(record_id, notifications_sent)
+deactivate LU
+
+deactivate SC
+
+== 5. 风险披露文档管理 ==
+
+CM -> CM: maintain_risk_disclosure_documents()
+activate CM
+
+== 5.1 策略风险说明文档 ==
+
+CM -> CM: update_strategy_risk_disclosure()
+note right CM
+  策略风险说明:
+  
+  **市场风险**:
+  - 标的价格波动风险
+  - 隐含波动率风险
+  - 流动性风险
+  - 相关性风险
+  
+  **模型风险**:
+  - Black-Scholes模型假设风险
+  - Greeks计算模型风险
+  - VaR模型风险
+  - 历史数据依赖风险
+  
+  **技术风险**:
+  - 系统故障风险
+  - 算法执行风险
+  - 数据质量风险
+  - 网络中断风险
+  
+  **操作风险**:
+  - 人员操作错误
+  - 流程执行风险
+  - 合规执行风险
+  - 第三方依赖风险
+end note
+
+== 5.2 最大亏损可能性分析 ==
+
+CM -> RMS: conduct_maximum_loss_analysis()
+activate RMS
+
+RMS -> RMS: perform_stress_testing_scenarios()
+note right RMS
+  最大亏损分析:
+  
+  **极端市场情景**:
+  - 市场崩盘情景 (-20% 单日跌幅)
+  - 流动性危机情景
+  - 波动率爆炸情景 (VIX>50)
+  - 系统性风险情景
+  
+  **技术故障情景**:
+  - 完全系统故障
+  - 部分功能失效
+  - 数据馈送中断
+  - 网络连接问题
+  
+  **最大损失估算**:
+  - 日最大损失: 10% 组合价值
+  - 周最大损失: 25% 组合价值
+  - 月最大损失: 40% 组合价值
+  - 极端情况损失: 100% 组合价值
+end note
+
+RMS --> CM: maximum_loss_analysis_report
+deactivate RMS
+
+CM -> CM: update_risk_disclosure_documentation()
+
+CM --> CM: risk_disclosure_documents_updated
+deactivate CM
+
+== 6. 监管报告自动生成 ==
+
+SC -> LU: generate_regulatory_reports(report_schedule)
+activate LU
+
+== 6.1 日交易报告生成 ==
+
+alt 日报生成
+    LU -> DAL: collect_daily_trading_data()
+    activate DAL
+    DAL --> LU: daily_trading_summary
+    deactivate DAL
+    
+    LU -> LU: format_daily_regulatory_report()
+    note right LU
+      日交易报告内容:
+      - 交易统计摘要
+      - 头寸变化分析
+      - 风险指标状况
+      - 异常事件记录
+      - 合规检查结果
+    end note
+
+== 6.2 月度风险报告生成 ==
+
+else 月报生成
+    LU -> DAL: collect_monthly_risk_data()
+    activate DAL
+    DAL --> LU: monthly_risk_analysis
+    deactivate DAL
+    
+    LU -> LU: format_monthly_risk_report()
+    note right LU
+      月度风险报告内容:
+      - VaR模型验证结果
+      - 压力测试结果
+      - 风险限额使用情况
+      - 模型性能回测
+      - 风险管理有效性评估
+    end note
+
+== 6.3 合规审计报告生成 ==
+
+else 审计报告生成
+    LU -> DAL: collect_compliance_audit_data()
+    activate DAL
+    DAL --> LU: compliance_audit_findings
+    deactivate DAL
+    
+    LU -> LU: format_compliance_audit_report()
+    note right LU
+      合规审计报告内容:
+      - 交易记录完整性审查
+      - 风险管理流程审计
+      - 系统控制有效性测试
+      - 监管要求合规性验证
+      - 改进建议和纠正措施
+    end note
+end
+
+LU -> VU: validate_report_completeness_and_accuracy(report)
+activate VU
+VU --> LU: report_validation_passed
+deactivate VU
+
+LU -> EAA: submit_regulatory_report(formatted_report)
+activate EAA
+EAA --> LU: report_submission_confirmed(submission_id)
+deactivate EAA
+
+LU -> DAL: archive_regulatory_report(report, submission_confirmation)
+activate DAL
+DAL --> LU: report_archived
+deactivate DAL
+
+LU --> SC: regulatory_report_generated_and_submitted(report_id)
+deactivate LU
+
+== 7. 合规审计追踪 ==
+
+VU -> DAL: perform_compliance_audit_trail_verification()
+activate VU
+activate DAL
+
+DAL -> DAL: trace_transaction_history()
+note right DAL
+  审计追踪验证:
+  - 交易记录完整性检查
+  - 决策过程可追溯性验证
+  - 风险评估记录连续性确认
+  - 时间戳一致性验证
+  - 数据修改日志完整性
+end note
+
+DAL --> VU: audit_trail_verification_results
+deactivate DAL
+
+VU -> VU: assess_compliance_gaps()
+note right VU
+  合规差距评估:
+  - 记录遗漏识别
+  - 流程偏差分析
+  - 时效性问题检查
+  - 数据质量问题识别
+  - 改进建议制定
+end note
+
+VU --> SC: compliance_audit_assessment(gaps_identified, recommendations)
+deactivate VU
+
+note over OTS, EAA
+  **验收标准**:
+  ✓ 记录格式符合监管要求
+  ✓ 记录完整性和可追溯性
+  ✓ 风险披露准确和及时
+  ✓ 监管报告自动生成
+end note
+
+@enduml

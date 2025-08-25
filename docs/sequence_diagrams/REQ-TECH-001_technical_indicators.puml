@@ -1,0 +1,178 @@
+@startuml REQ-TECH-001 实时技术指标计算流程时序图
+!theme plain
+
+title REQ-TECH-001: 实时技术指标计算 - 跨类流程时序图
+
+participant "DataAccessLayer" as DAL
+participant "TechnicalAnalysisEngine" as TAE
+participant "MarketAnalysisService" as MAS
+participant "CacheRepository" as CR
+participant "ExternalAPIAdapter" as EAA
+participant "ConfigurationManager" as CM
+
+note over DAL, CM
+  **需求**: REQ-TECH-001 实时技术指标计算
+  **价格指标**: 10秒级动量、价格加速度
+  **成交量指标**: 30秒级成交量突增、大单流入
+  **微趋势指标**: 1分钟级EMA3/EMA8、斜率变化
+  **更新延迟**: <500ms
+end note
+
+== 1. 指标计算引擎初始化 ==
+
+MAS -> TAE: initialize_indicators_engine()
+activate TAE
+
+TAE -> CM: get_indicators_config()
+activate CM
+CM --> TAE: IndicatorsConfig(ema_periods=[3,8], momentum_period=10, volume_period=30)
+deactivate CM
+
+TAE -> TAE: setup_calculation_buffers()
+note right TAE
+  初始化数据缓冲区:
+  - price_buffer: deque(maxlen=60)
+  - volume_buffer: deque(maxlen=120) 
+  - timestamp_buffer: deque(maxlen=60)
+  - ema_state: {3: None, 8: None}
+end note
+
+TAE --> MAS: engine_initialized
+deactivate TAE
+
+== 2. 实时数据流处理 ==
+
+DAL -> MAS: market_data_stream(symbol, price, volume, timestamp)
+activate MAS
+
+MAS -> TAE: update_market_data(symbol, price, volume, timestamp)
+activate TAE
+
+TAE -> TAE: add_to_buffers(price, volume, timestamp)
+
+== 3. 多频率指标并行计算 ==
+
+par 10秒级价格指标
+    TAE -> TAE: calculate_10s_momentum()
+    note right TAE
+      momentum_10s = (current_price - price_10s_ago) / price_10s_ago
+      acceleration = momentum_10s - momentum_10s_prev
+    end note
+    
+    TAE -> TAE: check_momentum_threshold(momentum, 0.001)
+
+else 30秒级成交量指标  
+    TAE -> TAE: calculate_30s_volume_indicators()
+    note right TAE
+      volume_ratio = volume_30s / avg_volume_5min
+      large_trade_detection = sum(trades > avg_size * 3)
+      volume_spike = volume_ratio > 1.5
+    end note
+
+else 1分钟级微趋势指标
+    TAE -> TAE: calculate_1min_ema_indicators()
+    note right TAE
+      ema3 = price.ewm(span=3).mean()
+      ema8 = price.ewm(span=8).mean()
+      slope_change = calculate_slope_change()
+      cross_signal = ema3 > ema8
+    end note
+end
+
+TAE -> TAE: aggregate_all_indicators()
+
+== 4. 指标验证和缓存 ==
+
+TAE -> TAE: validate_calculation_results()
+
+alt 计算结果有效
+    TAE -> CR: cache_indicators(symbol, indicators, ttl=10)
+    activate CR
+    CR --> TAE: indicators_cached
+    deactivate CR
+    
+    TAE --> MAS: TechnicalIndicators(momentum, volume_spike, ema_cross, timestamp)
+else 计算异常
+    TAE -> TAE: log_calculation_error()
+    TAE --> MAS: IndicatorError(symbol, error_type)
+end
+
+deactivate TAE
+
+== 5. 性能监控和优化 ==
+
+MAS -> MAS: measure_calculation_latency()
+
+alt 延迟 < 500ms
+    MAS -> MAS: update_performance_metrics(latency)
+else 延迟超标
+    MAS -> TAE: optimize_calculation_pipeline()
+    activate TAE
+    
+    TAE -> TAE: enable_incremental_calculation()
+    TAE -> TAE: optimize_buffer_size()
+    TAE -> CR: adjust_cache_strategy()
+    activate CR
+    CR --> TAE: cache_optimized
+    deactivate CR
+    
+    TAE --> MAS: pipeline_optimized
+    deactivate TAE
+end
+
+== 6. 多标的并发处理 ==
+
+loop 每个监控标的
+    par
+        DAL -> MAS: process_symbol_data("QQQ")
+        MAS -> TAE: calculate_indicators("QQQ")
+        activate TAE
+        TAE --> MAS: QQQ_indicators
+        deactivate TAE
+        
+    also
+        DAL -> MAS: process_symbol_data("SPY") 
+        MAS -> TAE: calculate_indicators("SPY")
+        activate TAE
+        TAE --> MAS: SPY_indicators
+        deactivate TAE
+        
+    also
+        DAL -> MAS: process_symbol_data("AAPL")
+        MAS -> TAE: calculate_indicators("AAPL")
+        activate TAE
+        TAE --> MAS: AAPL_indicators
+        deactivate TAE
+    end
+end
+
+MAS -> MAS: aggregate_cross_symbol_analysis()
+
+== 7. 指标历史追踪 ==
+
+MAS -> CR: store_indicators_history(symbol, indicators)
+activate CR
+
+CR -> CR: maintain_rolling_history(max_records=1440) 
+note right CR
+  保存1440个记录点:
+  - 1分钟间隔
+  - 24小时历史
+  - 自动清理过期数据
+end note
+
+CR --> MAS: history_updated
+deactivate CR
+
+MAS --> DAL: indicators_ready_for_analysis
+deactivate MAS
+
+note over DAL, CM
+  **验收标准**:
+  ✓ 指标计算精度≥99.9%
+  ✓ 指标更新延迟<500ms  
+  ✓ 支持8个标的同时计算
+  ✓ 历史数据验证算法正确性
+end note
+
+@enduml
