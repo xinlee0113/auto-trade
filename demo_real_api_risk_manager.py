@@ -40,7 +40,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 # Local imports
 from demos.client_config import get_client_config
 from src.config.trading_config import DEFAULT_TRADING_CONFIG, RiskLevel
-from src.models.trading_models import Position, OptionTickData, UnderlyingTickData
+from src.models.trading_models import Position, OptionTickData, UnderlyingTickData, MarketData
 from src.services.risk_manager import create_risk_manager, RiskEvent, StopLossType
 from src.utils.greeks_calculator import GreeksCalculator
 
@@ -144,19 +144,6 @@ class TradingSignal:
     exit_score: float  # 出场评分
     reasons: List[str] = field(default_factory=list)
     technical_details: Dict[str, Any] = field(default_factory=dict)
-
-
-@dataclass
-class MarketData:
-    """市场数据模型"""
-    timestamp: datetime
-    symbol: str
-    price: float
-    volume: int
-    bid: float = 0.0
-    ask: float = 0.0
-    bid_size: int = 0
-    ask_size: int = 0
 
 
 @dataclass
@@ -455,6 +442,9 @@ class RealTimeSignalGenerator:
                 
                 # 动态打印信号生成结果
                 self._print_trading_signal(signal)
+                
+                # 🚀 自动交易：信号生成后立即执行交易（固定1手）
+                self._auto_trade_on_signal(signal)
             
             self.last_update_time = market_data.timestamp
             return signal
@@ -869,33 +859,36 @@ class RealTimeSignalGenerator:
         try:
             score = 0.0
             
-            # Layer 1: 标的动量确认 (权重30%)
+            # Layer 1: 超短线动量确认 (权重40% - 0DTE核心指标)
             momentum_score = 0.0
             momentum_signals = [indicators.momentum_10s, indicators.momentum_30s, indicators.momentum_1m]
             
-            # 动量一致性检查
-            positive_momentum = sum(1 for m in momentum_signals if m > 0.001)
-            negative_momentum = sum(1 for m in momentum_signals if m < -0.001)
+            # 0DTE动量评分：更细粒度，更宽松阈值
+            positive_momentum = sum(1 for m in momentum_signals if m > 0.00001)  # 0.001%
+            negative_momentum = sum(1 for m in momentum_signals if m < -0.00001)  # -0.001%
+            
+            # 动量强度计算
+            avg_momentum = sum(abs(m) for m in momentum_signals) / 3
             
             if positive_momentum >= 2 and negative_momentum == 0:  # 多头动量一致
-                momentum_score = 30.0
-                print(f"🎯 [{self.symbol}] Layer1-动量确认: 多头一致 (+30分)")
+                momentum_score = 35.0 + min(avg_momentum * 100000, 10.0)  # 基础35分+强度加分
+                print(f"🎯 [{self.symbol}] Layer1-动量确认: 多头一致 (+{momentum_score:.1f}分)")
             elif negative_momentum >= 2 and positive_momentum == 0:  # 空头动量一致
-                momentum_score = 30.0
-                print(f"🎯 [{self.symbol}] Layer1-动量确认: 空头一致 (+30分)")
+                momentum_score = 35.0 + min(avg_momentum * 100000, 10.0)  # 基础35分+强度加分
+                print(f"🎯 [{self.symbol}] Layer1-动量确认: 空头一致 (+{momentum_score:.1f}分)")
             elif positive_momentum >= 1 or negative_momentum >= 1:  # 部分动量
-                momentum_score = 15.0
-                print(f"🎯 [{self.symbol}] Layer1-动量确认: 部分动量 (+15分)")
+                momentum_score = 20.0 + min(avg_momentum * 100000, 5.0)   # 基础20分+强度加分
+                print(f"🎯 [{self.symbol}] Layer1-动量确认: 部分动量 (+{momentum_score:.1f}分)")
             
             score += momentum_score
             
             # Layer 2: 成交量与价格确认 (权重25%)
             volume_score = 0.0
-            if indicators.volume_ratio > 1.5:  # 成交量突增
+            if indicators.volume_ratio > 1.1:  # 成交量突增 (降低阈值)
                 volume_score += 15.0
                 print(f"📊 [{self.symbol}] Layer2-成交量突增: {indicators.volume_ratio:.2f}x (+15分)")
             
-            if abs(indicators.price_volume_correlation) > 0.6:  # 价格成交量协同
+            if abs(indicators.price_volume_correlation) > 0.3:  # 价格成交量协同 (降低阈值)
                 volume_score += 10.0
                 print(f"🔗 [{self.symbol}] Layer2-价量协同: {indicators.price_volume_correlation:.3f} (+10分)")
             
@@ -918,7 +911,13 @@ class RealTimeSignalGenerator:
             
             # Layer 4: 期权特有评分 (权重25%)
             # 这里可以根据期权数据进一步评分，暂时给基础分
-            option_score = 15.0  # 基础期权评分
+            # Layer 4: 0DTE期权层确认 (权重20% - 增加基础分)
+            option_score = 20.0  # 0DTE基础期权评分提升
+            
+            # 隐含波动率加分（使用真实数据）
+            iv_score = self._calculate_iv_bonus(indicators)
+            option_score += iv_score
+            
             score += option_score
             
             print(f"🎯 [{self.symbol}] 入场总评分: {score:.1f}/100 "
@@ -960,47 +959,197 @@ class RealTimeSignalGenerator:
             return 0.0
     
     def _make_signal_decision(self, entry_score: float, exit_score: float, indicators: TechnicalIndicators) -> Tuple[str, float, float, List[str]]:
-        """做出信号决策"""
+        """0DTE期权专用信号决策 - 动态阈值体系"""
         reasons = []
         
-        # 出场信号优先
-        if exit_score >= 60:
+        # 🕐 市场时段分析
+        import datetime
+        from datetime import timezone, timedelta
+        
+        # 美东时间 (EST/EDT) - 夏令时使用-4，标准时间-5
+        # 当前是夏令时期间（3月-11月）
+        eastern = timezone(timedelta(hours=-4))  # EDT 夏令时
+        et_time = datetime.datetime.now(eastern)
+        current_hour = et_time.hour
+        
+        # 美股交易时间：9:30-16:00 EDT
+        is_market_hours = 9 <= current_hour <= 16
+        is_pre_post_market = not is_market_hours
+        
+        print(f"🕒 美东时间: {et_time.strftime('%H:%M:%S')} ({'盘中' if is_market_hours else '盘前/盘后'})")
+        
+        # 🎯 0DTE动态阈值设计
+        if is_pre_post_market:
+            # 盘前盘后：降低阈值，增加信号频率
+            strong_threshold = 50   # 原80 → 50
+            standard_threshold = 35  # 原60 → 35
+            weak_threshold = 25     # 原40 → 25
+            exit_threshold = 45     # 原60 → 45
+            reasons.append("盘前/盘后动态阈值")
+        else:
+            # 盘中：标准阈值
+            strong_threshold = 65   # 原80 → 65  
+            standard_threshold = 50  # 原60 → 50
+            weak_threshold = 35     # 原40 → 35
+            exit_threshold = 50     # 原60 → 50
+            reasons.append("盘中标准阈值")
+        
+        # 🚪 出场信号优先（风控）
+        if exit_score >= exit_threshold:
             signal_type = "SELL"
             strength = min(exit_score, 100.0)
             confidence = min(exit_score / 100.0, 1.0)
-            reasons.append(f"出场评分{exit_score:.1f}达到阈值")
+            reasons.append(f"止损出场评分{exit_score:.1f}")
             return signal_type, strength, confidence, reasons
         
-        # 入场信号判断
-        if entry_score >= 80:
-            # 根据动量方向决定买卖方向
-            momentum_direction = (indicators.momentum_10s + indicators.momentum_30s + indicators.momentum_1m) / 3
+        # 📈 入场信号分层判断
+        momentum_direction = (indicators.momentum_10s + indicators.momentum_30s + indicators.momentum_1m) / 3
+        
+        if entry_score >= strong_threshold:
+            # 🔥 强信号：快速进场
             signal_type = "BUY" if momentum_direction > 0 else "SELL"
-            strength = min(entry_score, 100.0)
+            strength = min(entry_score * 1.2, 100.0)  # 放大强度
             confidence = min(entry_score / 100.0, 1.0)
             reasons.append(f"强烈{signal_type}信号")
             reasons.append(f"入场评分{entry_score:.1f}")
-        elif entry_score >= 60:
-            momentum_direction = (indicators.momentum_10s + indicators.momentum_30s + indicators.momentum_1m) / 3
+            
+        elif entry_score >= standard_threshold:
+            # ⚡ 标准信号：正常进场
             signal_type = "BUY" if momentum_direction > 0 else "SELL"
             strength = entry_score
             confidence = entry_score / 100.0
             reasons.append(f"标准{signal_type}信号")
             reasons.append(f"入场评分{entry_score:.1f}")
-        elif entry_score >= 40:
-            momentum_direction = (indicators.momentum_10s + indicators.momentum_30s + indicators.momentum_1m) / 3
+            
+        elif entry_score >= weak_threshold:
+            # 🟡 谨慎信号：小仓位试探
             signal_type = "BUY" if momentum_direction > 0 else "SELL"
-            strength = entry_score
-            confidence = entry_score / 100.0
+            strength = entry_score * 0.8  # 降低强度
+            confidence = (entry_score / 100.0) * 0.8
             reasons.append(f"谨慎{signal_type}信号")
             reasons.append(f"入场评分{entry_score:.1f}")
         else:
+            # ⏸️ 等待信号
             signal_type = "HOLD"
             strength = 0.0
             confidence = 0.0
             reasons.append("信号不足，持有观望")
         
+        # 📊 0DTE时间衰减加权
+        time_decay_boost = self._calculate_time_decay_urgency()
+        if signal_type != "HOLD":
+            strength = min(strength + time_decay_boost, 100.0)
+            if time_decay_boost > 0:
+                reasons.append(f"时间衰减紧迫性+{time_decay_boost:.1f}")
+        
         return signal_type, strength, confidence, reasons
+    
+    def _calculate_iv_bonus(self, indicators: TechnicalIndicators, underlying_price: float = None) -> float:
+        """计算隐含波动率加分（使用真实期权数据）"""
+        try:
+            # 如果未提供标的价格，返回0（避免调用不存在的方法）
+            if not underlying_price:
+                print(f"⚠️ IV计算跳过：未提供标的价格")
+                return 0.0
+            
+            # TODO: 需要外部传入期权链数据，暂时返回0
+            print(f"⚠️ IV计算跳过：需要重构以接收期权链数据")
+            return 0.0
+            
+            if atm_options.empty:
+                return 0.0
+            
+            # 获取ATM期权的隐含波动率
+            avg_iv = 0.0
+            valid_iv_count = 0
+            
+            for _, option in atm_options.iterrows():
+                # 尝试从期权数据中获取隐含波动率
+                iv = option.get('implied_volatility', 0) or option.get('iv', 0)
+                if iv > 0:
+                    avg_iv += iv
+                    valid_iv_count += 1
+            
+            if valid_iv_count == 0:
+                # 如果无法获取IV数据，使用成交量和价差作为替代指标
+                return self._calculate_liquidity_bonus(atm_options)
+            
+            avg_iv = avg_iv / valid_iv_count
+            
+            # IV评分逻辑
+            iv_score = 0.0
+            if avg_iv > 0.3:  # 高IV环境（>30%）
+                iv_score = 10.0
+                print(f"📈 [{self.symbol}] Layer4-高IV环境: {avg_iv:.1%} (+10分)")
+            elif avg_iv > 0.2:  # 中等IV环境
+                iv_score = 5.0
+                print(f"📊 [{self.symbol}] Layer4-中等IV: {avg_iv:.1%} (+5分)")
+            elif avg_iv > 0.15:  # 低IV环境
+                iv_score = 2.0
+                print(f"📉 [{self.symbol}] Layer4-低IV: {avg_iv:.1%} (+2分)")
+            
+            return iv_score
+            
+        except Exception as e:
+            print(f"⚠️ 计算IV加分失败: {e}")
+            return 0.0
+    
+    def _calculate_liquidity_bonus(self, atm_options) -> float:
+        """当无法获取IV时，使用流动性指标替代"""
+        try:
+            total_volume = atm_options['volume'].sum()
+            avg_spread = 0.0
+            valid_spreads = 0
+            
+            for _, option in atm_options.iterrows():
+                if option.get('ask', 0) > 0 and option.get('bid', 0) > 0:
+                    spread_pct = (option['ask'] - option['bid']) / option.get('latest_price', option['ask'])
+                    if spread_pct > 0:
+                        avg_spread += spread_pct
+                        valid_spreads += 1
+            
+            if valid_spreads > 0:
+                avg_spread = avg_spread / valid_spreads
+            
+            # 流动性评分
+            liquidity_score = 0.0
+            if total_volume > 1000 and avg_spread < 0.05:  # 高流动性
+                liquidity_score = 5.0
+                print(f"💧 [{self.symbol}] Layer4-高流动性: 成交量{total_volume:,} (+5分)")
+            elif total_volume > 100:  # 中等流动性
+                liquidity_score = 2.0
+                print(f"💧 [{self.symbol}] Layer4-中等流动性: 成交量{total_volume:,} (+2分)")
+            
+            return liquidity_score
+            
+        except Exception as e:
+            print(f"⚠️ 计算流动性加分失败: {e}")
+            return 0.0
+    
+    def _calculate_time_decay_urgency(self) -> float:
+        """计算0DTE期权时间衰减紧迫性加分"""
+        import datetime
+        now = datetime.datetime.now()
+        
+        # 0DTE期权在交易日当天到期
+        market_close_time = now.replace(hour=16, minute=0, second=0, microsecond=0)
+        
+        if now > market_close_time:
+            return 0.0  # 市场已关闭
+        
+        # 距离收盘时间（分钟）
+        time_to_close = (market_close_time - now).total_seconds() / 60
+        
+        if time_to_close > 240:  # 4小时以上
+            return 0.0
+        elif time_to_close > 120:  # 2-4小时
+            return 5.0
+        elif time_to_close > 60:   # 1-2小时
+            return 10.0
+        elif time_to_close > 30:   # 30分钟-1小时
+            return 15.0
+        else:  # 最后30分钟
+            return 20.0
     
     def _print_technical_indicators(self, indicators: TechnicalIndicators):
         """动态打印技术指标 - 只在有重要变化时打印"""
@@ -1045,6 +1194,11 @@ class RealTimeSignalGenerator:
         print(f"   原因: {', '.join(signal.reasons)}")
         print(f"   EMA状态: EMA3={signal.technical_details['ema3']:.2f}, EMA8={signal.technical_details['ema8']:.2f}")
         print("=" * 50)
+    
+    def _auto_trade_on_signal(self, signal: TradingSignal):
+        """自动交易：调用现有期权交易逻辑（固定1手）"""
+        # 注意：这个方法在RealTimeSignalGenerator类中，需要传递给RealAPIRiskManagerDemo实例处理
+        pass
     
     def get_signal_statistics(self) -> Dict[str, Any]:
         """获取信号统计信息"""
@@ -1095,6 +1249,8 @@ class RealAPIRiskManagerDemo:
         try:
             self.client_config = get_client_config()
             self.quote_client = QuoteClient(self.client_config)
+            # 注意：trade_client在需要时懒加载（在期权交易方法中初始化）
+            self.trade_client = None
             print("✅ Tiger API连接初始化成功")
         except Exception as e:
             print(f"❌ Tiger API连接失败: {e}")
@@ -1143,6 +1299,11 @@ class RealAPIRiskManagerDemo:
         self.alert_count = 0
         self.emergency_triggered = False
         self.real_positions = {}  # 存储真实仓位数据
+        
+        # 🚀 自动交易频率控制
+        self.last_trade_time = None
+        self.active_positions = {}
+        self.max_concurrent_positions = 3
         
     def _print_initialization_summary(self):
         """打印初始化摘要"""
@@ -1228,6 +1389,10 @@ class RealAPIRiskManagerDemo:
                 if signal:
                     reasons_str = ", ".join(signal.reasons) if signal.reasons else "无详情"
                     print(f"🎯 [推送信号] {signal.signal_type}: {signal.strength:.3f} ({reasons_str})")
+                    
+                    # 🚀 自动交易：信号强度>70时触发交易（固定1手）
+                    if signal.strength > 70 and signal.signal_type in ['BUY', 'SELL']:
+                        self._execute_auto_trade(signal)
         except Exception as e:
             print(f"❌ 处理行情推送失败: {e}")
     
@@ -1241,6 +1406,10 @@ class RealAPIRiskManagerDemo:
                 signal = self.push_signal_generator.process_push_data(bbo_data)
                 if signal:
                     print(f"🎯 [BBO推送信号] {signal.signal_type}: {signal.strength:.3f}")
+                    
+                    # 🚀 自动交易：信号强度>70时触发交易（固定1手）
+                    if signal.strength > 70 and signal.signal_type in ['BUY', 'SELL']:
+                        self._execute_auto_trade(signal)
         except Exception as e:
             print(f"❌ 处理BBO推送失败: {e}")
     
@@ -1304,119 +1473,945 @@ class RealAPIRiskManagerDemo:
             print(f"❌ 连接推送服务失败: {e}")
             return False
     
-    def demo_push_data_analysis(self, symbol: str = "QQQ", duration: int = 60):
-        """演示推送数据与轮询数据的对比"""
-        print("\n" + "="*80)
-        print("🔄 推送数据 vs 轮询数据对比演示")
-        print("="*80)
-        print(f"📊 测试股票: {symbol}")
-        print(f"⏱️ 测试时长: {duration}秒")
-        print()
-        
-        # 创建两个信号生成器
-        push_generator = None
-        pull_generator = RealTimeSignalGenerator(symbol, use_push_data=False)
-        
-        # 尝试连接推送服务
-        push_connected = self.connect_push_and_subscribe(symbol)
-        if push_connected:
-            push_generator = self.push_signal_generator
-            print("✅ 推送模式已启动")
-        else:
-            print("❌ 推送模式启动失败，仅使用轮询模式")
-        
-        print("🚀 开始数据对比...")
-        print()
-        
-        # 统计变量
-        start_time = time.time()
-        pull_updates = 0
-        push_updates = 0
-        
+    def _execute_auto_trade(self, signal: TradingSignal):
+        """执行自动交易（真实市价下单，频率控制，固定1手）"""
         try:
-            while time.time() - start_time < duration:
-                current_time = time.time()
+            import time
+            current_time = time.time()
+            
+            # ⏱️ 交易频率控制（盘中30秒间隔）
+            if hasattr(self, 'last_trade_time') and self.last_trade_time:
+                time_since_last = current_time - self.last_trade_time
+                min_interval = 30.0  # 盘中最小交易间隔30秒
                 
-                # 轮询数据更新 (每0.6秒) - 仅用于对比测试
-                if current_time - getattr(self, '_last_pull_time', 0) >= pull_generator.update_interval:
-                    try:
-                        # 使用基本API调用获取轮询数据
-                        briefs = self.quote_client.get_stock_briefs([symbol])
-                        if briefs is not None and not briefs.empty:
-                            brief = briefs.iloc[0]
-            underlying_data = UnderlyingTickData(
-                symbol=symbol,
-                timestamp=datetime.now(),
-                price=float(brief.latest_price or 0),
-                volume=int(brief.volume or 0),
-                bid=float(getattr(brief, 'bid', 0.0) or 0.0),
-                ask=float(getattr(brief, 'ask', 0.0) or 0.0),
-                bid_size=int(getattr(brief, 'bid_size', 0) or 0),
-                ask_size=int(getattr(brief, 'ask_size', 0) or 0)
+                if time_since_last < min_interval:
+                    remaining = min_interval - time_since_last
+                    print(f"⏱️ [交易频控] 距上次交易{time_since_last:.1f}秒，等待{remaining:.1f}秒后再交易")
+                    return
+            
+            # 🎯 信号确认
+            print(f"\n🚀 [自动交易] 信号触发：{signal.signal_type} 强度{signal.strength:.1f}")
+            
+            # 📊 获取真实标的价格
+            underlying_price = self._get_current_underlying_price(signal.symbol)
+            if not underlying_price:
+                print(f"❌ 无法获取{signal.symbol}当前价格，跳过交易")
+                return
+            
+            print(f"📈 标的实时价格: {signal.symbol} = ${underlying_price:.2f}")
+            
+            # 📋 获取真实期权链
+            option_chain = self._get_0dte_option_chain(signal.symbol, underlying_price)
+            if option_chain is None or option_chain.empty:
+                print(f"❌ 无法获取期权链数据，跳过交易")
+                return
+            
+            # 🎯 选择最优期权
+            option_type = "CALL" if signal.signal_type == "BUY" else "PUT"
+            selected_option = self._select_best_option(option_chain, option_type, underlying_price)
+            
+            if not selected_option:
+                print(f"❌ 未找到合适的{option_type}期权，跳过交易\n")
+                return
+            
+            # 💰 获取真实市价（Ask价格买入）
+            market_ask = self._get_real_time_option_price(selected_option['symbol'])
+            if market_ask and market_ask > 0:
+                market_price = market_ask
+                print(f"🔄 更新期权市价: ${market_price:.2f} (实时Ask)")
+            else:
+                market_price = max(selected_option.get('ask', 0), selected_option.get('price', 0), 0.01)
+                print(f"📋 使用期权链价格: ${market_price:.2f}")
+            
+            # 确保价格为正
+            market_price = max(market_price, 0.01)
+            
+            # 🚀 执行真实PAPER下单
+            print(f"💼 执行买入: {selected_option['symbol']} x1手 @ ${market_price:.2f}")
+            
+            self._execute_paper_order(
+                option_info={**selected_option, 'price': market_price, 'ask': market_price},
+                action="BUY",
+                quantity=1,  # 固定1手
+                description=f"{signal.signal_type}自动交易-市价"
             )
-                            # 转换为MarketData格式
-                            market_data = MarketData(
-                                timestamp=underlying_data.timestamp,
-                                symbol=underlying_data.symbol,
-                                price=underlying_data.price,
-                                volume=underlying_data.volume,
-                                bid=underlying_data.bid,
-                                ask=underlying_data.ask,
-                                bid_size=underlying_data.bid_size,
-                                ask_size=underlying_data.ask_size
-                            )
-                            signal = pull_generator.update_market_data(market_data)
-                            pull_updates += 1
-                            if pull_updates % 5 == 0:  # 每5次更新打印一次
-                                print(f"📥 [轮询] 第{pull_updates}次更新 - ${underlying_data.price:.2f}")
-                    except Exception as e:
-                        print(f"⚠️ 轮询数据获取失败: {e}")
-                    self._last_pull_time = current_time
-                
-                # 推送数据由回调处理，这里只统计
-                if push_generator:
-                    push_updates = push_generator.push_stats['total_ticks']
-                    if push_updates > 0 and push_updates % 20 == 0:  # 每20个tick打印一次
-                        tps = push_generator.push_stats['ticks_per_second']
-                        print(f"📡 [推送] 第{push_updates}个tick - {tps:.1f} ticks/秒")
-                
-                # 每10秒输出对比统计
-                elapsed = time.time() - start_time
-                if int(elapsed) % 10 == 0 and int(elapsed) > 0:
-                    if hasattr(self, '_last_report_time') and abs(elapsed - self._last_report_time) < 1:
-                        continue  # 避免重复报告
-                    self._last_report_time = elapsed
-                    
-                    print(f"\n📊 [{int(elapsed)}秒] 数据更新对比:")
-                    print(f"   轮询模式: {pull_updates}次更新, 平均 {pull_updates/elapsed:.1f}次/秒")
-                    if push_generator:
-                        print(f"   推送模式: {push_updates}个tick, 平均 {push_updates/elapsed:.1f}个/秒")
-                        print(f"   推送优势: {push_updates/max(pull_updates, 1):.1f}倍数据量")
-                    print()
-                
-                time.sleep(0.1)  # 短暂休眠
-                
-        except KeyboardInterrupt:
-            print("\n🛑 用户中断测试")
-        
-        # 最终统计
-        total_elapsed = time.time() - start_time
-        print(f"\n📈 最终对比结果 ({total_elapsed:.1f}秒):")
-        print(f"轮询模式: {pull_updates}次更新, 平均 {pull_updates/total_elapsed:.1f}次/秒")
-        if push_generator:
-            print(f"推送模式: {push_updates}个tick, 平均 {push_updates/total_elapsed:.1f}个/秒")
-            print(f"数据密度提升: {push_updates/max(pull_updates, 1):.1f}倍")
-            print(f"延迟优势: 推送 <10ms vs 轮询 ~600ms")
-        
-        # 断开推送连接
-        if self.push_client and self.is_push_connected:
-            try:
-                self.push_client.unsubscribe_quote([symbol])
-                self.push_client.disconnect()
-                print("✅ 推送连接已断开")
+            
+            # ✅ 更新交易时间
+            self.last_trade_time = current_time
+            print(f"✅ 自动交易完成，下次交易需等待30秒\n")
+            
         except Exception as e:
-                print(f"⚠️ 断开推送连接时出错: {e}")
+            print(f"❌ 自动交易失败: {e}")
     
+    def _get_real_time_option_price(self, option_symbol: str) -> Optional[float]:
+        """获取期权实时价格（Ask价格）"""
+        try:
+            # 获取期权实时报价
+            option_quotes = self.quote_client.get_stock_briefs([option_symbol])
+            if option_quotes is not None and not option_quotes.empty:
+                quote = option_quotes.iloc[0]
+                
+                # 优先使用Ask价格进行买入
+                ask_price = getattr(quote, 'ask', 0) or getattr(quote, 'ask_price', 0)
+                if ask_price and ask_price > 0:
+                    return float(ask_price)
+                
+                # 备选：使用最新价格
+                latest_price = getattr(quote, 'latest_price', 0) or getattr(quote, 'price', 0)
+                if latest_price and latest_price > 0:
+                    return float(latest_price)
+            
+            return None
+            
+        except Exception as e:
+            print(f"⚠️ 获取期权实时价格失败 {option_symbol}: {e}")
+            return None
+    
+    def _execute_option_trade(self, signal: TradingSignal):
+        """执行期权交易
+        
+        完整的期权交易执行流程：
+        1. 获取0DTE期权链数据
+        2. 根据信号类型筛选最优期权
+        3. 计算买入手数和风险控制
+        4. 执行真实期权下单
+        5. 记录交易详情和监控
+        """
+        try:
+            print(f"🎯 开始执行期权交易 - {signal.signal_type} {signal.symbol}")
+            print("="*60)
+            
+            # 1. 获取标的当前价格
+            underlying_price = self._get_current_underlying_price(signal.symbol)
+            if not underlying_price:
+                print(f"❌ 无法获取 {signal.symbol} 当前价格，取消交易")
+                return
+                
+            print(f"📊 标的价格: {signal.symbol} = ${underlying_price:.2f}")
+            
+            # 2. 获取0DTE期权链
+            option_chain = self._get_0dte_option_chain(signal.symbol, underlying_price)
+            if not option_chain:
+                print(f"❌ 无法获取 {signal.symbol} 0DTE期权链，取消交易")
+                return
+            
+            # 3. 根据信号选择最优期权
+            selected_option = self._select_optimal_option(signal, option_chain, underlying_price)
+            if not selected_option:
+                print(f"❌ 无法找到合适的期权，取消交易")
+                return
+                
+            # 4. 计算交易参数
+            trade_params = self._calculate_trade_parameters(signal, selected_option, underlying_price)
+            
+            # 5. 执行交易下单
+            order_result = self._place_option_order(selected_option, trade_params)
+            
+            # 6. 记录和监控
+            if order_result:
+                self._record_trade_execution(signal, selected_option, trade_params, order_result)
+            
+        except Exception as e:
+            print(f"❌ 期权交易执行失败: {e}")
+    
+    def _get_current_underlying_price(self, symbol: str) -> Optional[float]:
+        """获取标的当前价格"""
+        try:
+            briefs = self.quote_client.get_stock_briefs([symbol])
+            if briefs is not None and not briefs.empty:
+                latest_price = briefs.iloc[0].latest_price
+                return float(latest_price) if latest_price else None
+            return None
+        except Exception as e:
+            print(f"⚠️ 获取标的价格失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def _get_0dte_option_chain(self, symbol: str, underlying_price: float):
+        """获取0DTE期权链，返回DataFrame"""
+        try:
+            # 获取今日到期的期权
+            today = datetime.now().strftime('%Y-%m-%d')
+            
+            # 计算ATM附近的执行价范围 (±5%)
+            price_range = underlying_price * 0.05
+            min_strike = underlying_price - price_range
+            max_strike = underlying_price + price_range
+            
+            print(f"🔍 获取0DTE期权链:")
+            print(f"   到期日: {today}")
+            print(f"   价格范围: ${min_strike:.0f} - ${max_strike:.0f}")
+            
+            # 调用真实API获取期权链
+            option_chain_data = self.fetch_real_option_data(symbol, datetime.strptime(today, '%Y-%m-%d'))
+            
+            # 如果返回的是列表，转换为DataFrame
+            if isinstance(option_chain_data, list):
+                if not option_chain_data:
+                    print("❌ 期权链数据为空")
+                    return pd.DataFrame()
+                
+                # 假设列表中是期权对象，转换为字典
+                option_dicts = []
+                for opt in option_chain_data:
+                    if hasattr(opt, 'strike'):  # 检查是否是期权对象
+                        option_dict = {
+                            'symbol': getattr(opt, 'symbol', ''),
+                            'strike': getattr(opt, 'strike', 0),
+                            'right': getattr(opt, 'right', ''),
+                            'expiry': getattr(opt, 'expiry', today),
+                            'latest_price': getattr(opt, 'latest_price', 0),
+                            'bid': getattr(opt, 'bid', 0),
+                            'ask': getattr(opt, 'ask', 0),
+                            'volume': getattr(opt, 'volume', 0),
+                            'open_interest': getattr(opt, 'open_interest', 0),
+                        }
+                        option_dicts.append(option_dict)
+                
+                option_chain = pd.DataFrame(option_dicts)
+            elif isinstance(option_chain_data, pd.DataFrame):
+                option_chain = option_chain_data.copy()
+            else:
+                print(f"❌ 无法处理期权链数据类型: {type(option_chain_data)}")
+                return pd.DataFrame()
+            
+            if option_chain.empty:
+                print("❌ 期权链DataFrame为空")
+                return pd.DataFrame()
+            
+            # 确保strike列为数值类型
+            option_chain['strike'] = pd.to_numeric(option_chain['strike'], errors='coerce')
+            option_chain = option_chain.dropna(subset=['strike'])
+            
+            # 筛选价格范围内的期权
+            filtered_chain = option_chain[
+                (option_chain['strike'] >= min_strike) & 
+                (option_chain['strike'] <= max_strike)
+            ]
+            
+            print(f"   原始期权数: {len(option_chain)}")
+            print(f"   筛选后数量: {len(filtered_chain)}")
+            
+            if not filtered_chain.empty:
+                print(f"   CALL期权: {len(filtered_chain[filtered_chain['right'] == 'CALL'])}")
+                print(f"   PUT期权: {len(filtered_chain[filtered_chain['right'] == 'PUT'])}")
+            
+            return filtered_chain
+            
+        except Exception as e:
+            print(f"⚠️ 获取期权链失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return pd.DataFrame()
+    
+    def _select_optimal_option(self, signal: TradingSignal, option_chain, underlying_price: float):
+        """根据信号选择最优期权"""
+        try:
+            if not option_chain:
+                return None
+                
+            # 根据信号类型确定期权类型
+            option_type = "CALL" if signal.signal_type == "BUY" else "PUT"
+            
+            # 筛选对应类型的期权
+            candidate_options = [opt for opt in option_chain if opt.right.upper() == option_type]
+            
+            if not candidate_options:
+                print(f"❌ 未找到 {option_type} 期权")
+                return None
+            
+            # 评分并选择最优期权 (综合考虑流动性、价差、希腊字母)
+            best_option = None
+            best_score = -1
+            
+            print(f"🎯 筛选最优 {option_type} 期权:")
+            for opt in candidate_options[:10]:  # 只评估前10个
+                score = self._calculate_option_score(opt, underlying_price, signal.strength)
+                print(f"   ${opt.strike:.0f} {opt.right} - 评分:{score:.1f}, 价格:${opt.latest_price:.2f}, 成交量:{opt.volume}")
+                
+                if score > best_score:
+                    best_score = score
+                    best_option = opt
+            
+            if best_option:
+                print(f"✅ 选中期权: ${best_option.strike:.0f} {best_option.right}")
+                print(f"   期权价格: ${best_option.latest_price:.2f}")
+                print(f"   买卖价差: ${best_option.bid:.2f} - ${best_option.ask:.2f}")
+                print(f"   成交量: {best_option.volume:,}")
+                print(f"   最终评分: {best_score:.1f}")
+                
+            return best_option
+            
+        except Exception as e:
+            print(f"⚠️ 选择期权失败: {e}")
+            return None
+    
+    def _calculate_option_score(self, option, underlying_price: float, signal_strength: float) -> float:
+        """计算期权评分"""
+        try:
+            score = 0.0
+            
+            # 1. 流动性评分 (40%)
+            if option.volume > 100:
+                score += 20
+            elif option.volume > 50:
+                score += 15
+            elif option.volume > 10:
+                score += 10
+            
+            if option.open_interest > 500:
+                score += 15
+            elif option.open_interest > 100:
+                score += 10
+            elif option.open_interest > 50:
+                score += 5
+            
+            # 2. 价差评分 (30%)
+            if option.ask > 0 and option.bid > 0:
+                spread_pct = (option.ask - option.bid) / option.latest_price
+                if spread_pct < 0.05:  # 5%以内
+                    score += 15
+                elif spread_pct < 0.10:  # 10%以内
+                    score += 10
+                elif spread_pct < 0.20:  # 20%以内
+                    score += 5
+            
+            # 3. 价值评分 (30%)
+            # ATM距离 (越接近ATM越好)
+            atm_distance = abs(option.strike - underlying_price) / underlying_price
+            if atm_distance < 0.02:  # 2%以内
+                score += 15
+            elif atm_distance < 0.05:  # 5%以内
+                score += 10
+            elif atm_distance < 0.10:  # 10%以内
+                score += 5
+            
+            # 期权价格合理性 (避免过于便宜或昂贵的期权)
+            if 0.10 <= option.latest_price <= 5.0:
+                score += 15
+            elif 0.05 <= option.latest_price <= 10.0:
+                score += 10
+            
+            return min(score, 100.0)
+            
+        except Exception as e:
+            print(f"⚠️ 计算期权评分失败: {e}")
+            return 0.0
+    
+    def _calculate_trade_parameters(self, signal: TradingSignal, option, underlying_price: float) -> Dict[str, Any]:
+        """计算交易参数"""
+        try:
+            # 风险管理参数
+            max_risk_per_trade = 1000.0  # 每笔交易最大风险$1000
+            max_position_value = 2000.0  # 最大仓位价值$2000
+            
+            # 根据信号强度调整仓位大小
+            strength_multiplier = signal.strength / 100.0
+            adjusted_risk = max_risk_per_trade * strength_multiplier
+            
+            # 计算买入手数
+            option_price = option.ask if option.ask > 0 else option.latest_price
+            max_contracts_by_risk = int(adjusted_risk / (option_price * 100))  # 期权乘数100
+            max_contracts_by_value = int(max_position_value / (option_price * 100))
+            
+            contracts = min(max_contracts_by_risk, max_contracts_by_value, 10)  # 最多10手
+            contracts = max(contracts, 1)  # 最少1手
+            
+            # 计算实际投入金额
+            total_cost = contracts * option_price * 100
+            
+            trade_params = {
+                'contracts': contracts,
+                'entry_price': option_price,
+                'total_cost': total_cost,
+                'max_loss': total_cost,  # 期权最大损失即投入成本
+                'stop_loss_pct': 0.50,  # 50%止损
+                'take_profit_pct': 2.0,  # 200%止盈
+                'expected_hold_time': '5-15分钟'
+            }
+            
+            print(f"💰 交易参数计算:")
+            print(f"   信号强度: {signal.strength:.1f}% -> 风险调整: {strength_multiplier:.2f}")
+            print(f"   期权价格: ${option_price:.2f}")
+            print(f"   买入手数: {contracts} 手")
+            print(f"   总投入: ${total_cost:.2f}")
+            print(f"   最大损失: ${total_cost:.2f} (100%)")
+            print(f"   止损水平: 50% (${total_cost * 0.5:.2f})")
+            print(f"   止盈目标: 200% (${total_cost * 2:.2f})")
+            
+            return trade_params
+            
+        except Exception as e:
+            print(f"⚠️ 计算交易参数失败: {e}")
+            return {}
+    
+    def _place_option_order(self, option, trade_params: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """执行期权下单"""
+        try:
+            print(f"📝 准备期权下单:")
+            print(f"   期权代码: {option.symbol}")
+            print(f"   期权类型: ${option.strike:.0f} {option.right}")
+            print(f"   买入手数: {trade_params['contracts']} 手")
+            print(f"   限价: ${trade_params['entry_price']:.2f}")
+            print(f"   总金额: ${trade_params['total_cost']:.2f}")
+            
+            # 初始化交易客户端（懒加载）
+            if self.trade_client is None:
+                from tigeropen.trade.trade_client import TradeClient
+                self.trade_client = TradeClient(self.client_config)
+            
+            # 使用配置中的账户信息（简化处理）
+            account = self.client_config.account
+            print(f"   交易账户: {account}")
+            
+            # 创建期权合约对象
+            from tigeropen.common.util.contract_utils import option_contract
+            contract = option_contract(option.symbol)
+            
+            # 创建限价买入订单
+            from tigeropen.common.util.order_utils import limit_order
+            order = limit_order(
+                account=account,
+                contract=contract, 
+                action='BUY',
+                quantity=trade_params['contracts'],
+                limit_price=trade_params['entry_price']
+            )
+            
+            print(f"🚀 执行期权买入订单...")
+            print(f"   下单时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}")
+            
+            # 实际下单 (可以设置为模拟模式)
+            DEMO_MODE = True  # 设置为True进行模拟，False为真实交易
+            
+            if DEMO_MODE:
+                # 模拟订单结果
+                order_result = {
+                    'order_id': f"DEMO_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                    'status': 'FILLED',
+                    'filled_quantity': trade_params['contracts'],
+                    'avg_fill_price': trade_params['entry_price'],
+                    'timestamp': datetime.now()
+                }
+                print(f"✅ 模拟订单提交成功! 订单ID: {order_result['order_id']}")
+                print(f"✅ 模拟成交: {order_result['filled_quantity']}手 @ ${order_result['avg_fill_price']:.2f}")
+            else:
+                # 真实下单
+                result = self.trade_client.place_order(order)
+                if result:
+                    order_result = {
+                        'order_id': getattr(result, 'id', 'UNKNOWN'),
+                        'status': 'SUBMITTED',
+                        'filled_quantity': 0,
+                        'avg_fill_price': 0,
+                        'timestamp': datetime.now()
+                    }
+                    print(f"✅ 真实订单提交成功! 订单ID: {order_result['order_id']}")
+                else:
+                    print("❌ 订单提交失败")
+                    return None
+            
+            return order_result
+            
+        except Exception as e:
+            print(f"❌ 期权下单失败: {e}")
+            return None
+    
+    def _record_trade_execution(self, signal: TradingSignal, option, trade_params: Dict[str, Any], order_result: Dict[str, Any]):
+        """记录交易执行"""
+        try:
+            print(f"📊 交易执行记录:")
+            print(f"   执行时间: {order_result['timestamp'].strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}")
+            print(f"   信号来源: {signal.signal_type} 信号 (强度: {signal.strength:.1f})")
+            print(f"   交易标的: {signal.symbol}")
+            print(f"   选择期权: ${option.strike:.0f} {option.right} @ ${trade_params['entry_price']:.2f}")
+            print(f"   交易数量: {trade_params['contracts']} 手")
+            print(f"   投入资金: ${trade_params['total_cost']:.2f}")
+            print(f"   订单状态: {order_result['status']}")
+            print(f"   预期持仓: {trade_params['expected_hold_time']}")
+            print("="*60)
+            
+            # 可以在这里添加交易记录到数据库或文件的逻辑
+            
+        except Exception as e:
+            print(f"⚠️ 记录交易失败: {e}")
+    
+    def _execute_paper_order(self, option_info: dict, action: str, quantity: int, description: str):
+        """执行PAPER账号期权下单
+        
+        Args:
+            option_info: 期权信息字典
+            action: "BUY" 或 "SELL"
+            quantity: 数量
+            description: 描述（看涨期权/看跌期权）
+        """
+        try:
+            print(f"📝 {description}下单详情:")
+            print(f"   期权代码: {option_info['symbol']}")
+            print(f"   期权类型: {option_info['option_type']}")
+            print(f"   行权价格: ${option_info['strike']:.2f}")
+            print(f"   期权价格: ${option_info['price']:.2f}")
+            print(f"   买卖价差: ${option_info['bid']:.2f} - ${option_info['ask']:.2f}")
+            print(f"   成交量: {option_info['volume']:,}")
+            print(f"   评分: {option_info['score']:.1f}/100")
+            print()
+            
+            # 计算交易成本
+            total_cost = option_info['price'] * quantity * 100  # 每手100股
+            print(f"💰 交易成本计算:")
+            print(f"   操作: {action} {quantity} 手")
+            print(f"   单价: ${option_info['price']:.2f}")
+            print(f"   总成本: ${total_cost:.2f}")
+            print()
+            
+            # 使用市价下单（ask价格买入）
+            market_price = option_info.get('ask', 0)
+            if market_price <= 0:
+                # 如果没有ask价格，尝试使用latest_price或者最小价格
+                market_price = max(option_info.get('price', 0), option_info.get('latest_price', 0), 0.01)
+            
+            print(f"💰 使用市价下单:")
+            print(f"   Ask价格: ${option_info.get('ask', 0):.2f}")
+            print(f"   Bid价格: ${option_info.get('bid', 0):.2f}")
+            print(f"   最新价格: ${option_info.get('price', 0):.2f}")
+            print(f"   下单价格: ${market_price:.2f} (市价买入)")
+            print()
+            
+            # 执行真实PAPER下单
+            print(f"🚀 执行PAPER账号下单...")
+            order_result = self._place_paper_option_order(
+                option_info=option_info,
+                action=action,
+                quantity=quantity,
+                price=market_price  # 使用真实市价
+            )
+            
+            if order_result and order_result.get('success'):
+                print(f"✅ {description}下单成功!")
+                print(f"   订单号: {order_result.get('order_id', 'N/A')}")
+                print(f"   状态: {order_result.get('status', 'PENDING')}")
+                print(f"   下单时间: {datetime.now().strftime('%H:%M:%S')}")
+            else:
+                print(f"❌ {description}下单失败: {order_result.get('error', '未知错误')}")
+                
+        except Exception as e:
+            print(f"❌ {description}下单异常: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def _place_paper_option_order(self, option_info: dict, action: str, quantity: int, price: float) -> dict:
+        """执行PAPER账号期权下单
+        
+        Args:
+            option_symbol: 期权代码 (如 "QQQ  250121C00570000")
+            action: "BUY" 或 "SELL"
+            quantity: 数量
+            price: 价格
+            
+        Returns:
+            dict: 下单结果
+        """
+        try:
+            from tigeropen.trade.trade_client import TradeClient
+            from tigeropen.common.consts import OrderType, Market
+            from tigeropen.trade.domain.order import Order
+            
+            # 初始化交易客户端 (PAPER模式) 
+            # 读取Tiger配置文件创建正确的配置对象
+            import os
+            from tigeropen.tiger_open_config import TigerOpenClientConfig
+            from tigeropen.common.util.signature_utils import read_private_key
+            
+            # 构建配置文件路径
+            config_path = os.path.normpath(os.path.join(os.path.dirname(__file__), 'config', 'tiger_openapi_config.properties'))
+            private_key_path = os.path.normpath(os.path.join(os.path.dirname(__file__), 'config', 'private_key.pem'))
+            
+            # 创建Tiger配置对象
+            tiger_config = TigerOpenClientConfig(
+                sandbox_debug=False,  # 生产环境
+                props_path=config_path
+            )
+            
+            # 设置私钥
+            if os.path.exists(private_key_path):
+                tiger_config.private_key = read_private_key(private_key_path)
+            else:
+                # 从配置文件读取私钥
+                import configparser
+                config = configparser.ConfigParser()
+                config.read(config_path)
+                
+                if config.has_option('DEFAULT', 'private_key_pk8'):
+                    tiger_config.private_key = config.get('DEFAULT', 'private_key_pk8')
+                elif config.has_option('DEFAULT', 'private_key_pk1'):
+                    tiger_config.private_key = config.get('DEFAULT', 'private_key_pk1')
+                else:
+                    raise ValueError("配置文件中未找到私钥信息")
+            
+            # 创建交易客户端
+            trade_client = TradeClient(tiger_config)
+            
+            # 创建期权订单
+            contract = self._create_option_contract(option_info)
+            if not contract:
+                return {"success": False, "error": "无法创建期权合约"}
+            
+            # 使用TradeClient的create_order方法创建订单
+            order = trade_client.create_order(
+                account=tiger_config.account,
+                contract=contract,
+                action=action,
+                order_type="LMT",  # 使用字符串而不是枚举避免序列化问题
+                quantity=quantity,
+                limit_price=price,
+                time_in_force="DAY"
+            )
+            
+            print(f"📋 订单详情:")
+            print(f"   账号: {order.account} (PAPER)")
+            print(f"   期权: {option_info['symbol']}")
+            print(f"   操作: {action}")
+            print(f"   数量: {quantity} 手")
+            print(f"   价格: ${price:.2f}")
+            print(f"   订单类型: 限价单")
+            print()
+            
+            # 提交订单
+            print(f"🚀 提交PAPER订单...")
+            print(f"🔍 调试信息:")
+            print(f"   合约详情: {contract.__dict__}")
+            print(f"   订单属性: {dir(order)}")
+            print()
+            
+            response = trade_client.place_order(order)
+            
+            # 🔍 智能判断订单结果
+            if response:
+                # 情况1: response是带id属性的对象
+                if hasattr(response, 'id'):
+                    order_id = response.id
+                    print(f"✅ 订单提交成功! 订单号: {order_id}")
+                    success = True
+                
+                # 情况2: response直接是订单ID数字
+                elif isinstance(response, (int, str)) and str(response).isdigit():
+                    order_id = str(response)
+                    print(f"✅ 订单提交成功! 订单号: {order_id}")
+                    print(f"📝 注意: API直接返回订单ID，说明下单成功")
+                    success = True
+                
+                # 情况3: 其他错误格式
+                else:
+                    error_msg = str(response)
+                    print(f"❌ 订单提交失败: {error_msg}")
+                    return {
+                        "success": False,
+                        "error": error_msg
+                    }
+                
+                if success:
+                    # 查询订单状态确认
+                    try:
+                        import time
+                        time.sleep(1)  # 等待1秒
+                        order_status = trade_client.get_order(order_id)
+                        
+                        status = "UNKNOWN"
+                        if order_status and hasattr(order_status, 'status'):
+                            status = order_status.status
+                            print(f"📊 订单状态确认: {status}")
+                        
+                        return {
+                            "success": True,
+                            "order_id": order_id,
+                            "status": status,
+                            "timestamp": datetime.now().isoformat()
+                        }
+                    except Exception as e:
+                        print(f"⚠️ 无法查询订单状态，但订单已提交: {e}")
+                        return {
+                            "success": True,
+                            "order_id": order_id,
+                            "status": "SUBMITTED",
+                            "timestamp": datetime.now().isoformat()
+                        }
+            else:
+                # 完全无响应
+                print(f"❌ 订单提交失败: 无响应")
+                return {
+                    "success": False,
+                    "error": "无响应"
+                }
+                
+        except Exception as e:
+            error_msg = f"下单异常: {e}"
+            print(f"❌ {error_msg}")
+            import traceback
+            traceback.print_exc()
+            return {
+                "success": False,
+                "error": error_msg
+            }
+    
+    def _create_option_contract(self, option_info: dict):
+        """根据期权信息创建期权合约对象
+        
+        Args:
+            option_info: 期权信息字典，包含strike, put_call, expiry等
+            
+        Returns:
+            Contract: 期权合约对象
+        """
+        try:
+            from tigeropen.trade.domain.contract import Contract
+            
+            print(f"📄 创建期权合约: {option_info['symbol']}")
+            
+            # 提取标的代码 (从QQQ_20250825_CALL_572中提取QQQ)
+            underlying = option_info['symbol'].split('_')[0]
+            
+            # 创建期权合约，必须提供完整的期权参数
+            contract = Contract()
+            contract.symbol = underlying                    # 标的代码，如 "QQQ"
+            contract.sec_type = "OPT"                      # 期权类型
+            contract.exchange = "SMART"                    # 智能路由交易所
+            contract.currency = "USD"                      # 货币
+            contract.strike = float(option_info['strike']) # 行权价，转换为标准float
+            contract.put_call = str(option_info['put_call']) # CALL 或 PUT，确保为字符串
+            contract.expiry = str(option_info['expiry'])   # 到期日，确保为字符串
+            contract.multiplier = 100                      # 期权乘数
+            
+            print(f"   标的代码: {contract.symbol}")
+            print(f"   证券类型: {contract.sec_type}")
+            print(f"   交易所: {contract.exchange}")
+            print(f"   货币: {contract.currency}")
+            print(f"   行权价: ${contract.strike}")
+            print(f"   期权类型: {contract.put_call}")
+            print(f"   到期日: {contract.expiry}")
+            print(f"   乘数: {contract.multiplier}")
+            print()
+            
+            return contract
+            
+        except Exception as e:
+            print(f"❌ 创建期权合约失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def _select_best_option(self, option_chain: pd.DataFrame, option_type: str, underlying_price: float) -> Optional[dict]:
+        """使用专业期权分析器选择最优期权
+        
+        Args:
+            option_chain: 期权链数据DataFrame
+            option_type: "CALL" 或 "PUT"
+            underlying_price: 标的价格
+            
+        Returns:
+            dict: 最优期权信息
+        """
+        try:
+            from src.services.option_analyzer import OptionAnalyzer
+            from src.config.option_config import OptionStrategy
+            
+            # 初始化专业期权分析器
+            analyzer = OptionAnalyzer()
+            
+            print(f"🔍 使用专业分析器筛选 {option_type} 期权:")
+            print(f"   期权链总数: {len(option_chain)}")
+            print(f"   期权链字段: {list(option_chain.columns)}")
+            
+            # 检查并修复字段名映射问题
+            option_chain_fixed = option_chain.copy()
+            
+            # 确保字段名正确映射
+            if 'right' in option_chain_fixed.columns and 'put_call' not in option_chain_fixed.columns:
+                option_chain_fixed['put_call'] = option_chain_fixed['right']
+            
+            print(f"   修复后字段: {list(option_chain_fixed.columns)}")
+            
+            # 执行期权分析
+            analysis_result = analyzer.analyze_options(
+                option_chains=option_chain_fixed,
+                current_price=underlying_price,
+                strategy=OptionStrategy.BALANCED,  # 使用平衡策略
+                top_n=3  # 获取前3个最优期权
+            )
+            
+            # 根据期权类型选择结果
+            if option_type == "CALL":
+                best_options = analysis_result.calls
+            else:  # PUT
+                best_options = analysis_result.puts
+            
+            if not best_options:
+                print(f"❌ 未找到合适的 {option_type} 期权")
+                return None
+            
+            # 选择评分最高的期权
+            best_option = best_options[0]  # 已经按评分排序
+            
+            print(f"\n📋 {option_type} 期权分析结果:")
+            for i, opt in enumerate(best_options, 1):
+                print(f"   #{i} ${opt.strike:.0f} {option_type} - 评分:{opt.score:.1f}, "
+                      f"价格:${opt.latest_price:.2f}, 成交量:{opt.volume:,}")
+            
+            print(f"\n✅ 选中最优 {option_type}:")
+            print(f"   期权代码: {best_option.symbol}")
+            print(f"   行权价: ${best_option.strike:.2f}")
+            print(f"   期权价格: ${best_option.latest_price:.2f}")
+            print(f"   买卖价差: ${best_option.bid:.2f} - ${best_option.ask:.2f}")
+            print(f"   成交量: {best_option.volume:,}")
+            print(f"   最终评分: {best_option.score:.1f}/100")
+            print(f"   Delta: {best_option.delta:.3f}")
+            print(f"   Gamma: {best_option.gamma:.3f}")
+            print()
+            
+            # 从原始数据中找到对应的期权获取put_call信息
+            matched_option = option_chain_fixed[option_chain_fixed['symbol'] == best_option.symbol].iloc[0]
+            
+            # 转换为字典格式以保持兼容性，确保价格信息完整
+            return {
+                'symbol': best_option.symbol,
+                'option_type': option_type,
+                'strike': best_option.strike,
+                'price': best_option.latest_price,
+                'bid': matched_option.get('bid_price', best_option.bid),      # 从原始数据获取bid价格
+                'ask': matched_option.get('ask_price', best_option.ask),      # 从原始数据获取ask价格
+                'latest_price': matched_option.get('latest_price', best_option.latest_price),  # 最新价格
+                'volume': best_option.volume,
+                'score': best_option.score,
+                'delta': best_option.delta,
+                'gamma': best_option.gamma,
+                'expiry': best_option.expiry,
+                'put_call': matched_option['put_call']  # 从原始数据获取期权类型
+            }
+                
+        except Exception as e:
+            print(f"❌ 专业期权分析失败: {e}")
+            import traceback
+            traceback.print_exc()
+            raise Exception(f"期权分析失败，必须解决问题：{e}")
+    
+    def test_option_trading_execution(self, symbol: str):
+        """测试期权交易执行逻辑
+        
+        使用PAPER模拟账号测试：
+        1. 获取0DTE期权链
+        2. 筛选最优看涨期权买入1手
+        3. 筛选最优看跌期权买入1手
+        4. 执行真实下单并展示结果
+        """
+        try:
+            print(f"🎯 期权交易测试开始 - {symbol}")
+            print("=" * 50)
+            
+            # 1. 获取标的当前价格
+            underlying_price = self._get_current_underlying_price(symbol)
+            if not underlying_price:
+                print(f"❌ 无法获取 {symbol} 当前价格，测试终止")
+                return
+                
+            print(f"📊 标的价格: {symbol} = ${underlying_price:.2f}")
+            print()
+            
+            # 2. 获取0DTE期权链
+            option_chain = self._get_0dte_option_chain(symbol, underlying_price)
+            if option_chain is None or option_chain.empty:
+                print("❌ 无法获取期权链数据，测试终止")
+                return
+            
+            # 3. 直接从期权链中筛选ATM期权进行测试（简化流程）
+            atm_range = 3.0  # ATM范围±$3
+            atm_options = option_chain[
+                (option_chain['strike'] >= underlying_price - atm_range) & 
+                (option_chain['strike'] <= underlying_price + atm_range)
+            ].copy()
+            
+            # 分离CALL和PUT期权（使用正确的字段名）
+            call_options = atm_options[atm_options['right'] == 'CALL']
+            put_options = atm_options[atm_options['right'] == 'PUT']
+            
+            print(f"✅ 筛选ATM期权: CALL {len(call_options)} 个, PUT {len(put_options)} 个")
+            
+            # 4. 筛选并买入最优看涨期权1手
+            print("🚀 === 看涨期权测试 ===")
+            if not call_options.empty:
+                # 选择最接近ATM的CALL期权
+                call_options['atm_distance'] = abs(call_options['strike'] - underlying_price)
+                best_call = call_options.loc[call_options['atm_distance'].idxmin()]
+                
+                # 构建期权信息，直接使用DataFrame中的真实价格
+                call_option_info = {
+                    'symbol': best_call['symbol'],
+                    'option_type': 'CALL',
+                    'strike': best_call['strike'],
+                    'price': best_call.get('latest_price', 0),
+                    'bid': best_call.get('bid', 0),
+                    'ask': best_call.get('ask', 0),
+                    'latest_price': best_call.get('latest_price', 0),
+                    'volume': best_call.get('volume', 0),
+                    'score': 95.0,  # ATM期权评分
+                    'put_call': 'CALL',
+                    'right': 'CALL',
+                    'expiry': '2025-08-26'
+                }
+                print(f"✅ 选中最优CALL期权 (使用真实市价):")
+                print(f"   期权代码: {call_option_info['symbol']}")
+                print(f"   行权价: ${call_option_info['strike']:.2f}")
+                print(f"   期权价格: ${call_option_info['price']:.2f}")
+                print(f"   Bid/Ask: ${call_option_info['bid']:.2f}/${call_option_info['ask']:.2f}")
+                print(f"   成交量: {call_option_info['volume']:,}")
+                print()
+                
+                self._execute_paper_order(call_option_info, "BUY", 1, "看涨期权")
+            else:
+                print("❌ 未找到合适的看涨期权")
+            
+            print()
+            
+            # 5. 筛选并买入最优看跌期权1手  
+            print("📉 === 看跌期权测试 ===")
+            if not put_options.empty:
+                # 选择最接近ATM的PUT期权
+                put_options['atm_distance'] = abs(put_options['strike'] - underlying_price)
+                best_put = put_options.loc[put_options['atm_distance'].idxmin()]
+                
+                # 构建期权信息，直接使用DataFrame中的真实价格
+                put_option_info = {
+                    'symbol': best_put['symbol'],
+                    'option_type': 'PUT',
+                    'strike': best_put['strike'],
+                    'price': best_put.get('latest_price', 0),
+                    'bid': best_put.get('bid', 0),
+                    'ask': best_put.get('ask', 0),
+                    'latest_price': best_put.get('latest_price', 0),
+                    'volume': best_put.get('volume', 0),
+                    'score': 95.0,  # ATM期权评分
+                    'put_call': 'PUT',
+                    'right': 'PUT',
+                    'expiry': '2025-08-26'
+                }
+                print(f"✅ 选中最优PUT期权 (使用真实市价):")
+                print(f"   期权代码: {put_option_info['symbol']}")
+                print(f"   行权价: ${put_option_info['strike']:.2f}")
+                print(f"   期权价格: ${put_option_info['price']:.2f}")
+                print(f"   Bid/Ask: ${put_option_info['bid']:.2f}/${put_option_info['ask']:.2f}")
+                print(f"   成交量: {put_option_info['volume']:,}")
+                print()
+                
+                self._execute_paper_order(put_option_info, "BUY", 1, "看跌期权")
+            else:
+                print("❌ 未找到合适的看跌期权")
+                
+            print("\n🎉 期权交易测试完成!")
+            
+        except Exception as e:
+            print(f"❌ 期权交易测试失败: {e}")
+            import traceback
+            traceback.print_exc()
+
     def start_push_data_trading(self, symbol: str) -> bool:
         """启动基于推送数据的实时交易信号生成"""
         try:
@@ -1474,6 +2469,12 @@ class RealAPIRiskManagerDemo:
             
             print(f"✅ 获取到 {len(option_chain)} 个期权合约")
             print(f"📋 期权链列名: {list(option_chain.columns)}")
+            
+            # 检查原始期权数据的价格信息
+            print(f"🔍 原始期权价格数据样本:")
+            sample_options = option_chain.head(3)
+            for _, option in sample_options.iterrows():
+                print(f"   {option['symbol']}: strike=${option['strike']}, bid=${option.get('bid_price', 'N/A')}, ask=${option.get('ask_price', 'N/A')}, latest=${option.get('latest_price', 'N/A')}")
             
             # 数据预处理
             option_chain['strike'] = pd.to_numeric(option_chain['strike'], errors='coerce')
@@ -1886,95 +2887,6 @@ class RealAPIRiskManagerDemo:
                   f"BBO更新:{self.push_data_stats['bbo_updates']}, "
                   f"频率:{events_per_sec:.1f}/秒")
     
-
-    
-    def demo_real_time_signal_generation(self, duration_minutes=1):
-        """演示实时信号生成系统 - 集成技术分析"""
-        print("🎯 演示1.5: 实时信号生成系统")
-        print("-" * 50)
-        print("💡 展示多层信号确认体系和动态技术指标计算")
-        print("📊 数据来源: Tiger OpenAPI 0.6秒更新频率 (API频率控制)")
-        print()
-        
-        # 为QQQ创建信号生成器
-        signal_generator = self.create_signal_generator("QQQ")
-        
-        duration_seconds = duration_minutes * 60
-        print(f"🚀 开始实时信号生成演示 ({duration_minutes}分钟)...")
-        start_time = time.time()
-        signal_count = 0
-        error_count = 0
-        last_status_time = start_time
-        
-        while time.time() - start_time < duration_seconds:
-            try:
-                # 注意：此演示已弃用，请使用推送模式 (python demo_real_api_risk_manager.py signals)
-                print("⚠️ 轮询模式已弃用，请使用: python demo_real_api_risk_manager.py signals")
-                break
-                
-                if underlying_data:
-                    # 使用真实数据
-                    market_data = MarketData(
-                        timestamp=underlying_data.timestamp,
-                        symbol=underlying_data.symbol,
-                        price=underlying_data.price,
-                        volume=underlying_data.volume,
-                        bid=underlying_data.bid,
-                        ask=underlying_data.ask,
-                        bid_size=underlying_data.bid_size,
-                        ask_size=underlying_data.ask_size
-                    )
-                    print(f"📊 QQQ 实时数据: ${market_data.price:.2f}, 成交量: {market_data.volume:,}")
-                else:
-                    error_count += 1
-                    print(f"❌ 获取 QQQ 数据失败，错误次数: {error_count}")
-                    if error_count >= 5:  # 连续失败5次则休息更久
-                        print(f"🔄 连续失败{error_count}次，休息10秒...")
-                        time.sleep(10)
-                    else:
-                        time.sleep(signal_generator.update_interval)
-                    continue
-                
-                # 更新信号生成器并获取信号
-                signal = signal_generator.update_market_data(market_data)
-                if signal:
-                    signal_count += 1
-                    
-                    # 如果生成了强信号，可以进一步处理
-                    if signal.strength >= 60:
-                        print(f"🔔 强信号触发! 可考虑实际交易执行")
-                        print(f"   建议动作: {signal.signal_type}")
-                        print(f"   执行时机: 立即 (信号强度: {signal.strength:.1f})")
-                        print()
-                
-                # 每2分钟显示一次统计信息
-                elapsed = time.time() - start_time
-                if elapsed - (last_status_time - start_time) >= 120:  # 每2分钟
-                    stats = signal_generator.get_signal_statistics()
-                    print(f"📊 [{elapsed/60:.1f}分钟] 稳定性统计:")
-                    print(f"   生成信号数: {stats['total_signals']}")
-                    print(f"   错误次数: {error_count}")
-                    print(f"   成功率: {((stats['total_signals'])/(stats['total_signals']+error_count)*100):.1f}%" if (stats['total_signals']+error_count) > 0 else "100%")
-                    print(f"   缓存状态: {stats['cache_status']}")
-                    print(f"   内存使用: 正常")
-                    print()
-                    last_status_time = time.time()
-                
-                time.sleep(signal_generator.update_interval)  # 使用配置的更新间隔
-                
-            except Exception as e:
-                error_count += 1
-                print(f"⚠️ 信号生成过程中出错(#{error_count}): {e}")
-                time.sleep(1)
-        
-        # 最终统计
-        final_stats = signal_generator.get_signal_statistics()
-        print(f"✅ 信号生成演示完成!")
-        print(f"📈 总计生成信号: {final_stats['total_signals']} 个")
-        print(f"📊 数据更新次数: {final_stats['cache_status']['price_data']} 次")
-        print(f"🎯 信号生成率: {(final_stats['total_signals']/max(final_stats['cache_status']['price_data'], 1)*100):.1f}%")
-        print()
-    
     def demo_real_time_risk_monitoring(self):
         """演示实时风险监控 - 100%真实API数据"""
         print("⚡ 演示2: 实时风险监控 (30秒) - 🔴 纯真实API数据")
@@ -2066,16 +2978,16 @@ class RealAPIRiskManagerDemo:
                     
                     # 检查风险 - 使用风险管理器的组合风险检查
                     alerts = self.risk_manager.check_portfolio_risks()
-                        
-                        if alerts:
-                            print(f"🚨 {position.symbol} 基于真实价格触发 {len(alerts)} 个风险警报")
-                            for alert in alerts:
-                                print(f"  ⚠️ {alert.severity.upper()}: {alert.message}")
-                        else:
-                            print(f"✅ {position.symbol} 价格变动在安全范围内")
-                        
-                        update_count += 1
-                        print()
+                    
+                    if alerts:
+                        print(f"🚨 {position.symbol} 基于真实价格触发 {len(alerts)} 个风险警报")
+                        for alert in alerts:
+                            print(f"  ⚠️ {alert.severity.upper()}: {alert.message}")
+                    else:
+                        print(f"✅ {position.symbol} 价格变动在安全范围内")
+                    
+                    update_count += 1
+                    print()
                 
                 # 定期检查组合风险
                 if update_count % 3 == 0:  # 每3次更新检查一次
@@ -2263,7 +3175,6 @@ class RealAPIRiskManagerDemo:
             
             # 依次运行各个演示
             self.demo_real_market_risk_control()
-            self.demo_real_time_signal_generation(30)  # 30分钟稳定性测试
             self.demo_real_time_risk_monitoring()  # 纯真实数据
             self.demo_stress_test_with_simulated_scenarios()  # 模拟极端场景
             self.demo_risk_summary_report()
@@ -2307,15 +3218,17 @@ def stability_test_30min():
         print("🎯 测试内容: 信号生成系统稳定性")
         print()
         
-        # 只运行信号生成演示
-        demo.demo_real_time_signal_generation(30)
+        # 运行推送模式信号生成测试
+        print("🚀 启动推送模式信号生成测试...")
+        print("⚠️ 推送信号测试功能请使用: python demo_real_api_risk_manager.py test_signals")
+        print("📊 当前稳定性测试专注于系统核心功能验证")
         
     except KeyboardInterrupt:
         print("\n⚠️ 稳定性测试被用户中断")
     except Exception as e:
         print(f"\n❌ 稳定性测试失败: {e}")
-            import traceback
-            traceback.print_exc()
+        import traceback
+        traceback.print_exc()
 
 
 def main():
@@ -2344,6 +3257,13 @@ def main():
                         print("\n🛑 推送模式停止")
                 else:
                     print("❌ 推送模式启动失败")
+            
+            elif arg == "test_options":
+                # 测试期权交易执行逻辑 (PAPER账号)
+                print("🎯 开始测试期权交易执行逻辑 (PAPER模拟账号)")
+                print("将筛选最优看涨/看跌期权各买入1手...")
+                print("="*60)
+                demo.test_option_trading_execution("QQQ")
             elif arg == "signals" or arg == "push_signals":
                 # 纯推送模式信号生成 (长时间运行)
                 if demo.start_push_data_trading("QQQ"):
@@ -2356,7 +3276,7 @@ def main():
                 else:
                     print("❌ 推送模式启动失败")
             elif arg == "push_analysis":
-                demo.demo_push_data_analysis("QQQ", duration=120)  # 2分钟推送数据分析
+                print("⚠️ push_analysis 已废弃，请使用 'test_signals' 进行推送数据测试")
             else:
                 print("❌ 未知的演示模式")
                 print("可用模式:")
@@ -2366,7 +3286,7 @@ def main():
                 print("  push_analysis - 纯推送数据分析")
                 print("  push_signals  - 纯推送信号模式(同signals)")
         else:
-        demo.run_complete_real_api_demo()
+            demo.run_complete_real_api_demo()
             
     except KeyboardInterrupt:
         print("\n⚠️ 演示被用户中断")

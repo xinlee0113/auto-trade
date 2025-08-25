@@ -69,3 +69,13 @@ def setup_logging(level: int = logging.INFO):
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
+
+
+def setup_option_logger() -> logging.Logger:
+    """
+    为期权分析器设置专用日志记录器
+    
+    Returns:
+        配置好的期权日志记录器
+    """
+    return get_logger('option_analyzer', logging.INFO)
