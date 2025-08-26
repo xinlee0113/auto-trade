@@ -146,16 +146,20 @@ class OptionAnalyzer:
             # 使用字段映射获取数据
             field_map = OptionConstants.FIELD_MAPPINGS
             
-            # 🔧 修复latest_price获取逻辑：优先使用ask作为latest_price
+            # 🔥 专业价格获取逻辑：交易员级别的价格层级
             raw_latest_price = float(row.get(field_map['latest_price'], 0))
             bid_price = float(row.get(field_map['bid'], 0))
             ask_price = float(row.get(field_map['ask'], 0))
             
-            # 如果latest_price为0，使用ask价格作为代替
-            if raw_latest_price == 0 and ask_price > 0:
-                effective_latest_price = ask_price
+            # 专业级价格优先级: Last Trade > Mid Price > Ask (保守估计)
+            if raw_latest_price > 0:
+                effective_latest_price = raw_latest_price  # 优先使用真实成交价
+            elif bid_price > 0 and ask_price > 0:
+                effective_latest_price = (bid_price + ask_price) / 2  # Mid Price
+            elif ask_price > 0:
+                effective_latest_price = ask_price  # 保守估计
             else:
-                effective_latest_price = raw_latest_price
+                effective_latest_price = 0  # 无有效价格
             
             option_data = OptionData(
                 symbol=row.get('symbol', ''),
@@ -167,18 +171,25 @@ class OptionAnalyzer:
                 ask=ask_price,
                 volume=int(row.get(field_map['volume'], 0)),
                 open_interest=int(row.get(field_map['open_interest'], 0)),
-                delta=float(row.get(field_map['delta'], 0)) or self.calculator.estimate_delta(
-                    current_price, float(row.get('strike', 0)), row.get(field_map['right'], '')
+                # 🔥 修复Greeks逻辑缺陷：0是合法值，只有缺失才估算
+                delta=self._get_safe_greeks_value(
+                    row, field_map['delta'], 
+                    lambda: self.calculator.estimate_delta(current_price, float(row.get('strike', 0)), row.get(field_map['right'], ''))
                 ),
-                gamma=float(row.get(field_map['gamma'], 0)) or self.config.DEFAULT_GAMMA,
-                theta=float(row.get(field_map['theta'], 0)) or self.config.DEFAULT_THETA,
-                vega=float(row.get(field_map['vega'], 0)) or self.config.DEFAULT_VEGA,
+                gamma=self._get_safe_greeks_value(row, field_map['gamma'], lambda: self.config.DEFAULT_GAMMA),
+                theta=self._get_safe_greeks_value(row, field_map['theta'], lambda: self.config.DEFAULT_THETA),
+                vega=self._get_safe_greeks_value(row, field_map['vega'], lambda: self.config.DEFAULT_VEGA),
                 implied_vol=float(row.get(field_map['implied_vol'], 0)) or self.config.DEFAULT_IMPLIED_VOL
             )
             
             # 计算衍生字段
             option_data.calculate_intrinsic_value(current_price)
             option_data.calculate_moneyness(current_price)
+            
+            # 🔥 专业级数据验证和0DTE风险检测
+            if not self._validate_option_data(option_data, current_price):
+                logger.warning(f"期权数据验证失败: {option_data.symbol}")
+                return None
             
             return option_data
             
@@ -222,6 +233,101 @@ class OptionAnalyzer:
             logger.error(f"期权评估失败: {e}")
             return options[:top_n]
     
+    def _get_safe_greeks_value(self, row: pd.Series, field_name: str, default_func) -> float:
+        """安全获取Greeks值：区分缺失数据和0值"""
+        try:
+            # 检查字段是否存在且不为NaN
+            if field_name in row and pd.notna(row[field_name]):
+                value = float(row[field_name])
+                # 0是合法的Greeks值，直接返回
+                return value
+            else:
+                # 字段缺失或为NaN时才使用默认值
+                return default_func()
+        except (ValueError, TypeError):
+            return default_func()
+    
+    def _validate_option_data(self, option: OptionData, current_price: float) -> bool:
+        """专业级期权数据验证"""
+        try:
+            # 基础数据验证
+            if option.strike <= 0 or option.latest_price < 0:
+                return False
+            
+            # Greeks合理性检验
+            if not self._validate_greeks_sanity(option, current_price):
+                return False
+            
+            # 价差合理性检验  
+            if option.bid > 0 and option.ask > 0:
+                if option.ask <= option.bid:  # 买卖价倒挂
+                    return False
+                if (option.ask - option.bid) / option.ask > 0.5:  # 价差过大(>50%)
+                    logger.warning(f"期权价差过大: {option.symbol}, 价差比例: {(option.ask - option.bid) / option.ask:.2%}")
+            
+            # 🔥 0DTE特殊风险检测
+            if self._is_high_gamma_risk(option, current_price):
+                logger.warning(f"检测到高Gamma风险: {option.symbol}, Gamma: {option.gamma:.3f}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"期权数据验证异常: {e}")
+            return False
+    
+    def _validate_greeks_sanity(self, option: OptionData, current_price: float) -> bool:
+        """Greeks数据合理性检验"""
+        try:
+            # Delta范围检验
+            if option.right.upper() == 'CALL':
+                if not (0 <= option.delta <= 1):
+                    logger.warning(f"Call Delta异常: {option.symbol}, Delta: {option.delta}")
+                    return False
+            else:  # PUT
+                if not (-1 <= option.delta <= 0):
+                    logger.warning(f"Put Delta异常: {option.symbol}, Delta: {option.delta}")
+                    return False
+            
+            # Gamma合理性(总是非负)
+            if option.gamma < 0:
+                logger.warning(f"Gamma为负值: {option.symbol}, Gamma: {option.gamma}")
+                return False
+            
+            # Theta合理性(通常为负，除非深度ITM的Put)
+            if option.theta > 0.1:  # 允许轻微正值
+                logger.warning(f"Theta异常偏高: {option.symbol}, Theta: {option.theta}")
+            
+            # IV合理性检验(0.05-2.0之间)
+            if not (0.05 <= option.implied_vol <= 2.0):
+                logger.warning(f"IV异常: {option.symbol}, IV: {option.implied_vol}")
+                return False
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Greeks验证异常: {e}")
+            return False
+    
+    def _is_high_gamma_risk(self, option: OptionData, current_price: float) -> bool:
+        """检测0DTE高Gamma风险"""
+        try:
+            # ATM期权的高Gamma检测
+            moneyness = abs(option.strike - current_price) / current_price
+            
+            # ATM附近(±2%)且Gamma>0.1的期权有Pin Risk
+            if moneyness <= 0.02 and option.gamma > 0.1:
+                return True
+            
+            # 任何期权Gamma>0.3都是极端情况
+            if option.gamma > 0.3:
+                return True
+                
+            return False
+            
+        except Exception as e:
+            logger.error(f"Gamma风险检测异常: {e}")
+            return False
+
     def _calculate_price_range(self, current_price: float) -> str:
         """计算价格区间字符串"""
         price_range = current_price * self.config.DEFAULT_PRICE_RANGE_PERCENT
