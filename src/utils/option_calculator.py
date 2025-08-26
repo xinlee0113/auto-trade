@@ -113,15 +113,14 @@ class OptionCalculator:
             return 0.0
     
     def _calculate_value_score(self, option: OptionData, current_price: float) -> float:
-        """计算价值评分"""
+        """计算价值评分 - 专业级IV评分算法"""
         try:
             implied_vol = option.implied_vol
             moneyness = option.moneyness
             time_value = option.time_value
             
-            # 隐含波动率评分：适中的IV更优
-            iv_score = max(0, OptionConstants.MAX_SCORE - 
-                          abs(implied_vol - 0.2) * 500) if implied_vol > 0 else 0
+            # 🔥 专业级IV评分：基于QQQ期权特性的动态评估
+            iv_score = self._calculate_professional_iv_score(implied_vol, moneyness)
             
             # 价值合理性评分：ATM附近期权通常更活跃
             moneyness_score = max(0, OptionConstants.MAX_SCORE - moneyness * 2000)
@@ -135,6 +134,36 @@ class OptionCalculator:
         except Exception as e:
             logger.warning(f"计算价值评分失败: {e}")
             return 0.0
+    
+    def _calculate_professional_iv_score(self, implied_vol: float, moneyness: float) -> float:
+        """专业级IV评分算法 - 基于波动率微笑曲线"""
+        try:
+            if implied_vol <= 0:
+                return 0.0
+            
+            # 基于QQQ历史数据的动态IV基准 (考虑波动率微笑)
+            # QQQ典型IV范围: 0.12-0.35，ATM通常0.18左右
+            base_iv = 0.18 + moneyness * 0.1  # 简化的波动率微笑曲线
+            
+            # 计算IV偏离程度
+            iv_deviation = abs(implied_vol - base_iv)
+            
+            # 非线性评分系统：适度偏离可接受，极端偏离严重惩罚
+            if iv_deviation < 0.05:  # 5%以内 - 正常范围
+                return OptionConstants.MAX_SCORE
+            elif iv_deviation < 0.10:  # 5%-10% - 可接受范围
+                # 线性衰减: 100 → 70
+                return 100 - (iv_deviation - 0.05) * 600
+            elif iv_deviation < 0.15:  # 10%-15% - 轻度惩罚
+                # 加速衰减: 70 → 40
+                return 70 - (iv_deviation - 0.10) * 600
+            else:  # >15% - 严重惩罚
+                # 重度惩罚: 40 → 10
+                return max(10, 40 - (iv_deviation - 0.15) * 200)
+                
+        except Exception as e:
+            logger.warning(f"专业IV评分计算失败: {e}")
+            return 50.0  # 返回中性评分
     
     def get_score_breakdown(self, option: OptionData, strategy: OptionStrategy) -> ScoreBreakdown:
         """获取评分明细"""
