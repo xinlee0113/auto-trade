@@ -1637,17 +1637,41 @@ class RealAPIRiskManagerDemo:
                 market_price = market_ask
                 print(f"🔄 更新期权市价: ${market_price:.2f} (实时Ask)")
             else:
+                # 🎯 智能价格选择策略：优先级 Ask > Latest > Bid，选择最优买入价
                 option_ask = selected_option.get('ask', 0)
-                option_price = selected_option.get('price', 0)
+                option_bid = selected_option.get('bid', 0) 
                 option_latest = selected_option.get('latest_price', 0)
+                option_price = selected_option.get('price', 0)
                 
-                market_price = max(option_ask, option_price, option_latest, 0.01)
-                print(f"📋 使用期权链价格: ${market_price:.2f}")
-                print(f"🔍 [调试] 价格来源: ask={option_ask}, price={option_price}, latest={option_latest}")
+                # 智能价格选择：优先Ask，其次Latest，最后Price
+                if option_ask and option_ask > 0:
+                    market_price = option_ask
+                    price_source = f"Ask=${option_ask:.3f}"
+                elif option_latest and option_latest > 0:
+                    market_price = option_latest  
+                    price_source = f"Latest=${option_latest:.3f}"
+                elif option_price and option_price > 0:
+                    market_price = option_price
+                    price_source = f"Price=${option_price:.3f}"
+                else:
+                    # 极端情况：所有价格都为0，使用最小有效价格
+                    market_price = 0.01
+                    price_source = "Fallback=0.01"
+                
+                print(f"📋 使用期权链价格: ${market_price:.3f} ({price_source})")
+                print(f"🔍 [调试] 价格详情: ask={option_ask}, bid={option_bid}, latest={option_latest}, price={option_price}")
             
-            # 确保价格为正，但设置合理下限
-            market_price = max(market_price, 0.05)  # 提高最小价格到0.05
-            print(f"🔍 [调试] 最终下单价格: ${market_price:.2f}")
+            # ✅ 移除硬编码下限，使用动态验证
+            if market_price <= 0:
+                market_price = 0.01  # 仅在价格为0或负数时设置最小值
+                print(f"⚠️ 价格异常，使用最小值: ${market_price:.3f}")
+            
+            # 🎯 0DTE期权特殊验证
+            if not self._validate_0dte_option_price(market_price, selected_option['symbol']):
+                print(f"❌ 0DTE期权价格验证失败，跳过交易")
+                return
+                
+            print(f"💰 最终下单价格: ${market_price:.3f}")
             
             # 🚀 执行真实PAPER下单
             print(f"💼 执行买入: {selected_option['symbol']} x1手 @ ${market_price:.2f}")
@@ -2021,35 +2045,102 @@ class RealAPIRiskManagerDemo:
                 self.total_position_value = sum(pos['current_value'] for pos in self.active_positions.values())
                 
             else:
-                print(f"❌ 平仓失败: {result.get('error', '未知错误')}")
+                error_msg = result.get('error', '未知错误') if result else '无响应数据'
+                print(f"❌ 平仓失败: {error_msg}")
                 
         except Exception as e:
             print(f"❌ 执行平仓失败: {e}")
     
     def _get_real_time_option_price(self, option_symbol: str) -> Optional[float]:
-        """获取期权实时价格（Ask价格）"""
+        """获取期权实时价格（Ask价格）- 增强版本"""
         try:
             # 方法1: 直接获取期权报价
             option_quotes = self.quote_client.get_stock_briefs([option_symbol])
             if option_quotes is not None and not option_quotes.empty:
                 quote = option_quotes.iloc[0]
                 
-                # 优先使用Ask价格进行买入
+                # 🎯 智能价格选择和验证
                 ask_price = getattr(quote, 'ask_price', 0)
-                if ask_price and ask_price > 0:
-                    return float(ask_price)
+                bid_price = getattr(quote, 'bid_price', 0)
+                latest_price = getattr(quote, 'latest_price', 0)
                 
-                # 备选：使用最新价格
-                latest_price = getattr(quote, 'latest_price', 0) 
+                # 价格合理性检查
+                if ask_price and bid_price and ask_price > 0 and bid_price > 0:
+                    # 检查买卖价差是否合理（不超过50%）
+                    spread_ratio = (ask_price - bid_price) / bid_price if bid_price > 0 else float('inf')
+                    if spread_ratio <= 0.5:  # 价差不超过50%
+                        print(f"✅ 期权价格验证通过: Ask=${ask_price:.3f}, Bid=${bid_price:.3f}, 价差{spread_ratio:.1%}")
+                        return float(ask_price)
+                    else:
+                        print(f"⚠️ 价差过大: Ask=${ask_price:.3f}, Bid=${bid_price:.3f}, 价差{spread_ratio:.1%}")
+                
+                # 备选1：如果价差过大，使用最新价格
                 if latest_price and latest_price > 0:
+                    print(f"📈 使用最新价格: ${latest_price:.3f}")
                     return float(latest_price)
+                
+                # 备选2：如果只有Ask价格
+                if ask_price and ask_price > 0:
+                    print(f"💰 使用Ask价格: ${ask_price:.3f}")
+                    return float(ask_price)
             
             # 方法2: 通过期权链查询（如果直接查询失败）
+            print(f"🔄 尝试通过期权链获取价格...")
             return self._get_option_price_from_chain(option_symbol)
             
         except Exception as e:
             print(f"⚠️ 获取期权实时价格失败 {option_symbol}: {e}")
             return self._get_option_price_from_chain(option_symbol)
+    
+    def _validate_0dte_option_price(self, option_price: float, option_symbol: str) -> bool:
+        """验证0DTE期权价格的合理性"""
+        try:
+            # 获取标的当前价格用于比较
+            underlying_price = self._get_current_underlying_price("QQQ")
+            if not underlying_price:
+                print(f"⚠️ 无法获取QQQ价格，跳过验证")
+                return True  # 无法验证时通过
+            
+            # 解析期权信息
+            parts = option_symbol.split('_')
+            if len(parts) >= 4:
+                option_type = parts[2]  # CALL or PUT
+                strike_price = float(parts[3])
+                
+                # 计算内在价值
+                if option_type == "CALL":
+                    intrinsic_value = max(0, underlying_price - strike_price)
+                else:  # PUT
+                    intrinsic_value = max(0, strike_price - underlying_price)
+                
+                # 0DTE期权价格验证规则
+                time_value = option_price - intrinsic_value
+                
+                # 规则1: 期权价格不应超过标的价格的30%（防止异常高价）
+                if option_price > underlying_price * 0.3:
+                    print(f"❌ 期权价格过高: ${option_price:.3f} > {underlying_price*0.3:.3f} (标的30%)")
+                    return False
+                
+                # 规则2: 时间价值不应为负值过多（允许小幅负值，考虑流动性差异）
+                if time_value < -0.1:
+                    print(f"❌ 时间价值异常: ${time_value:.3f} < -0.1")
+                    return False
+                
+                # 规则3: 极度虚值期权价格不应过高
+                moneyness = abs(underlying_price - strike_price) / underlying_price
+                if moneyness > 0.05 and option_price > 0.5:  # 虚值超5%且价格>0.5
+                    print(f"❌ 虚值期权价格过高: 偏离度{moneyness:.1%}, 价格${option_price:.3f}")
+                    return False
+                
+                print(f"✅ 0DTE期权价格验证通过: 内在价值${intrinsic_value:.3f}, 时间价值${time_value:.3f}")
+                return True
+            else:
+                print(f"⚠️ 期权代码格式异常，跳过验证: {option_symbol}")
+                return True
+                
+        except Exception as e:
+            print(f"⚠️ 0DTE期权价格验证失败: {e}")
+            return True  # 验证失败时通过，避免阻止交易
     
     def _get_option_price_from_chain(self, option_symbol: str) -> Optional[float]:
         """通过期权链获取期权价格（备用方法）"""
