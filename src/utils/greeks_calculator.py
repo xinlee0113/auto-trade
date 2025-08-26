@@ -70,14 +70,14 @@ class GreeksCalculator:
         """初始化计算器"""
         self.constants = TradingConstants
         
-        # 市场参数
-        self.risk_free_rate = 0.05  # 5% 无风险利率
-        self.dividend_yield = 0.0   # 股息率
+        # 🔥 修复无风险利率：使用当前市场利率
+        self.risk_free_rate = 0.045  # 4.5% 当前美国10年期国债利率(应动态获取)
+        self.dividend_yield = 0.0075  # QQQ股息率约0.75%
         
-        # 0DTE期权参数
-        self.min_time_to_expiry = 1/525600  # 最小1分钟（年化）
-        self.max_volatility = 5.0           # 最大隐含波动率500%
-        self.min_volatility = 0.01          # 最小隐含波动率1%
+        # 🔥 修复0DTE期权参数：更精确的时间处理
+        self.min_time_to_expiry = 1/(365*24*60*60)  # 最小1秒（年化）- 更精确
+        self.max_volatility = 10.0          # 提升至1000% (0DTE可能极端)
+        self.min_volatility = 0.005         # 降至0.5% (更宽容)
         
         # 缓存
         self.volatility_cache: Dict[str, float] = {}
@@ -136,9 +136,13 @@ class GreeksCalculator:
             vega = self._calculate_vega(S, d1, T, q)
             rho = self._calculate_rho(K, T, r, d2, is_call)
             
-            # 计算0DTE特有指标
+            # 🔥 修复0DTE特有指标计算
             time_decay_rate = abs(theta) / (24 * 60)  # 每分钟theta衰减
-            gamma_exposure = gamma * S * S * 0.01     # 1%价格变动的gamma敞口
+            
+            # 修复Gamma敞口公式：泰勒展开二阶项
+            price_change = S * 0.01  # 1%价格变动
+            gamma_exposure = 0.5 * gamma * (price_change ** 2)  # 正确的Gamma敞口公式
+            
             theta_burn_rate = abs(theta) / option_price if option_price > 0 else 0  # theta燃烧率
             
             # 风险评估

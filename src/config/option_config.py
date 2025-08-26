@@ -25,8 +25,8 @@ class OptionConfig:
     MAX_SYMBOLS_PER_REQUEST: int = 20
     MAX_OPTION_BRIEFS_PER_REQUEST: int = 30
     
-    # 筛选参数 - 针对0DTE期权优化
-    DEFAULT_PRICE_RANGE_PERCENT: float = 0.03  # ±3% (0DTE期权需要更大范围捕获OTM机会)
+    # 筛选参数 - 针对超短期交易优化
+    DEFAULT_PRICE_RANGE_PERCENT: float = 0.005  # ±0.5% (30秒-8分钟交易需要极小范围，接近真ATM)
     MIN_VOLUME_THRESHOLD: int = 10
     MIN_OPEN_INTEREST_THRESHOLD: int = 100
     MAX_SPREAD_PERCENTAGE: float = 0.20  # 20%

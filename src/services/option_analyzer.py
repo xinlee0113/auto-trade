@@ -258,12 +258,21 @@ class OptionAnalyzer:
             if not self._validate_greeks_sanity(option, current_price):
                 return False
             
-            # 价差合理性检验  
+            # 🔥 修复价差合理性检验 - 考虑0DTE特殊性
             if option.bid > 0 and option.ask > 0:
                 if option.ask <= option.bid:  # 买卖价倒挂
                     return False
-                if (option.ask - option.bid) / option.ask > 0.5:  # 价差过大(>50%)
-                    logger.warning(f"期权价差过大: {option.symbol}, 价差比例: {(option.ask - option.bid) / option.ask:.2%}")
+                
+                spread_ratio = (option.ask - option.bid) / option.ask
+                # 0DTE期权最后几小时价差可能很大，使用动态阈值
+                max_spread = 0.8 if hasattr(option, 'expiry') and '202' in str(option.expiry) else 0.5
+                
+                if spread_ratio > max_spread:
+                    logger.warning(f"期权价差过大: {option.symbol}, 价差比例: {spread_ratio:.2%}")
+            
+            # 🔥 新增内在价值验证
+            if not self._validate_intrinsic_value(option, current_price):
+                return False
             
             # 🔥 0DTE特殊风险检测
             if self._is_high_gamma_risk(option, current_price):
@@ -338,6 +347,33 @@ class OptionAnalyzer:
             
         except Exception as e:
             logger.error(f"Gamma风险检测异常: {e}")
+            return False
+    
+    def _validate_intrinsic_value(self, option: OptionData, current_price: float) -> bool:
+        """验证期权价格vs内在价值的合理性"""
+        try:
+            # 计算内在价值
+            if option.right.upper() == 'CALL':
+                intrinsic_value = max(current_price - option.strike, 0)
+            else:  # PUT
+                intrinsic_value = max(option.strike - current_price, 0)
+            
+            # 期权价格不能低于内在价值(套利条件)
+            if option.latest_price < intrinsic_value * 0.95:  # 允许5%误差
+                logger.warning(f"期权价格低于内在价值: {option.symbol}, "
+                             f"价格: {option.latest_price:.3f}, 内在价值: {intrinsic_value:.3f}")
+                return False
+            
+            # 对于深度OTM期权，价格不应过高
+            if intrinsic_value == 0 and option.latest_price > current_price * 0.1:  # OTM期权价格>标的10%
+                logger.warning(f"OTM期权价格过高: {option.symbol}, "
+                             f"价格: {option.latest_price:.3f}, 标的: {current_price:.2f}")
+                return False
+                
+            return True
+            
+        except Exception as e:
+            logger.error(f"内在价值验证异常: {e}")
             return False
 
     def _calculate_price_range(self, current_price: float) -> str:
