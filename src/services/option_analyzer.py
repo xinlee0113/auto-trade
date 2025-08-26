@@ -24,7 +24,7 @@ logger = setup_option_logger()
 class OptionAnalyzer:
     """期权分析器"""
     
-    def __init__(self, config: OptionConfig = None):
+    def __init__(self, config: Optional[OptionConfig] = None):
         self.config = config or OptionConfig()
         self.calculator = OptionCalculator(self.config)
         self.validator = DataValidator()
@@ -37,7 +37,7 @@ class OptionAnalyzer:
         current_price: float,
         strategy: OptionStrategy = OptionStrategy.BALANCED,
         top_n: int = 5,
-        option_filter: OptionFilter = None
+        option_filter: Optional[OptionFilter] = None
     ) -> OptionAnalysisResult:
         """
         分析期权并返回最优选择
