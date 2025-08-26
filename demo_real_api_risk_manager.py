@@ -1600,6 +1600,10 @@ class RealAPIRiskManagerDemo:
                 self._check_auto_close_conditions()
                 return
             
+            # 🕐 0DTE专业时间控制 - 最后30分钟禁止新开仓
+            if not self._check_trading_time_window():
+                return
+            
             # 🎯 信号确认
             print(f"\n🚀 [自动交易] 信号触发：{signal.signal_type} 强度{signal.strength:.1f}")
             
@@ -1669,6 +1673,11 @@ class RealAPIRiskManagerDemo:
             # 🎯 0DTE期权特殊验证
             if not self._validate_0dte_option_price(market_price, selected_option['symbol']):
                 print(f"❌ 0DTE期权价格验证失败，跳过交易")
+                return
+            
+            # 💧 流动性和价差验证
+            if not self._validate_option_liquidity(selected_option):
+                print(f"❌ 期权流动性验证失败，跳过交易")
                 return
                 
             print(f"💰 最终下单价格: ${market_price:.3f}")
@@ -1815,19 +1824,19 @@ class RealAPIRiskManagerDemo:
             signal_strength = signal.strength
             current_positions = len(self.active_positions)
             
-            # 🎯 基于信号强度的基础间隔
-            if signal_strength >= 90:
-                base_interval = 10.0    # 强信号：10秒
+            # 🎯 基于信号强度的基础间隔 (优化版 - 提高质量)
+            if signal_strength >= 95:
+                base_interval = 60.0    # 极强信号：1分钟 (提高标准)
+                strength_desc = "极强信号"
+            elif signal_strength >= 85:
+                base_interval = 90.0    # 强信号：1.5分钟
                 strength_desc = "强信号"
-            elif signal_strength >= 80:
-                base_interval = 15.0    # 较强信号：15秒  
+            elif signal_strength >= 75:
+                base_interval = 120.0   # 较强信号：2分钟
                 strength_desc = "较强信号"
-            elif signal_strength >= 70:
-                base_interval = 20.0    # 中等信号：20秒
-                strength_desc = "中等信号"
             else:
-                base_interval = 25.0    # 弱信号：25秒
-                strength_desc = "弱信号"
+                base_interval = 300.0   # 弱信号：5分钟 (大幅降频)
+                strength_desc = "弱信号(降频)"
             
             # 📊 基于持仓数量的调整系数
             if current_positions == 0:
@@ -1869,6 +1878,45 @@ class RealAPIRiskManagerDemo:
         except Exception as e:
             print(f"⚠️ 动态频控计算失败，使用默认20秒: {e}")
             return 20.0
+    
+    def _check_trading_time_window(self) -> bool:
+        """检查是否在允许的交易时间窗口内"""
+        try:
+            from datetime import datetime, timezone, timedelta
+            eastern = timezone(timedelta(hours=-4))  # EDT
+            et_time = datetime.now(eastern)
+            
+            current_hour = et_time.hour
+            current_minute = et_time.minute
+            
+            # 分时段差异化策略
+            if current_hour < 9 or (current_hour == 9 and current_minute < 30):
+                print("⚠️ 开盘前禁止交易")
+                return False
+            
+            # 开盘30分钟禁止交易（波动剧烈）
+            if current_hour == 9 and current_minute < 60:
+                print("⚠️ 开盘30分钟内禁止交易 (波动剧烈期)")
+                return False
+            
+            # 最后30分钟禁止新开仓（流动性风险）
+            if current_hour == 15 and current_minute >= 30:
+                print("⚠️ 收盘前30分钟禁止新开仓 (避免0DTE流动性风险)")
+                return False
+            
+            if current_hour >= 16:
+                print("⚠️ 收盘后禁止交易")
+                return False
+            
+            # 午间时段降频提示
+            if 12 <= current_hour < 14:
+                print("🕐 午间时段 - 市场相对平静")
+            
+            return True
+            
+        except Exception as e:
+            print(f"⚠️ 时间检查失败: {e}")
+            return True  # 默认允许交易
     
     # ==================== 自动平仓系统 ====================
     
@@ -2142,6 +2190,50 @@ class RealAPIRiskManagerDemo:
         except Exception as e:
             print(f"⚠️ 0DTE期权价格验证失败: {e}")
             return True  # 验证失败时通过，避免阻止交易
+    
+    def _validate_option_liquidity(self, option_info: dict) -> bool:
+        """验证期权流动性和价差合理性"""
+        try:
+            # 获取价格信息
+            bid_price = option_info.get('bid', 0)
+            ask_price = option_info.get('ask', 0) 
+            latest_price = option_info.get('latest_price', 0)
+            volume = option_info.get('volume', 0)
+            open_interest = option_info.get('open_interest', 0)
+            
+            # 规则1: 买卖价差检查 (>5%拒绝交易)
+            if bid_price > 0 and ask_price > 0:
+                spread = ask_price - bid_price
+                spread_pct = spread / ask_price
+                
+                if spread_pct > 0.05:  # 5%价差上限
+                    print(f"❌ 价差过大: {spread_pct:.1%} > 5% (${spread:.3f})")
+                    return False
+                print(f"✅ 价差检查通过: {spread_pct:.1%} (${spread:.3f})")
+            
+            # 规则2: 成交量检查 (需要有基本流动性)
+            if volume < 10:  # 最低成交量要求
+                print(f"❌ 成交量过低: {volume} < 10手")
+                return False
+            print(f"✅ 成交量检查通过: {volume:,}手")
+            
+            # 规则3: 未平仓合约检查
+            if open_interest < 50:  # 最低未平仓要求
+                print(f"❌ 未平仓合约过少: {open_interest} < 50手")
+                return False
+            print(f"✅ 未平仓检查通过: {open_interest:,}手")
+            
+            # 规则4: 价格有效性检查
+            if latest_price <= 0.01:  # 最低价格要求
+                print(f"❌ 期权价格过低: ${latest_price:.3f} ≤ $0.01")
+                return False
+            
+            print(f"✅ 流动性验证通过: 价差{spread_pct:.1%}, 成交量{volume:,}, 未平仓{open_interest:,}")
+            return True
+            
+        except Exception as e:
+            print(f"⚠️ 流动性验证失败: {e}")
+            return True  # 验证失败时通过，避免过度限制
     
     def _get_option_price_from_chain(self, option_symbol: str) -> Optional[float]:
         """通过期权链获取期权价格（备用方法）"""
