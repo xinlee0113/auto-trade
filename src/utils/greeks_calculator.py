@@ -115,7 +115,7 @@ class GreeksCalculator:
             if implied_vol is None:
                 sigma = self._calculate_implied_volatility(
                     S, K, T, r, q, option_price, 
-                    option_data.right == 'CALL'
+                    option_data.right == 'CALL', option_data
                 )
             else:
                 sigma = implied_vol
@@ -190,15 +190,21 @@ class GreeksCalculator:
             
             # 对于0DTE期权，计算到收盘的小时数
             if days_to_expiry == 0:
-                now = datetime.now()
-                market_close = datetime.combine(today, time(16, 0))  # 4:00 PM EST
+                from datetime import timezone, timedelta
                 
-                if now >= market_close:
+                # 🔥 修复时区问题：使用美东时间
+                est_tz = timezone(timedelta(hours=-5))  # EST时区
+                now_est = datetime.now(est_tz)
+                
+                # 美股收盘时间 4:00 PM EST
+                market_close_est = datetime.combine(today, time(16, 0)).replace(tzinfo=est_tz)
+                
+                if now_est >= market_close_est:
                     # 已过收盘时间，设为最小值
                     return self.min_time_to_expiry
                 
                 # 计算到收盘的小时数，转换为年化
-                hours_to_expiry = (market_close - now).total_seconds() / 3600
+                hours_to_expiry = (market_close_est - now_est).total_seconds() / 3600
                 return max(hours_to_expiry / (365 * 24), self.min_time_to_expiry)
             
             # 非0DTE期权，使用天数
@@ -307,15 +313,18 @@ class GreeksCalculator:
             return 0.0
     
     def _calculate_implied_volatility(self, S: float, K: float, T: float, r: float, q: float, 
-                                    market_price: float, is_call: bool) -> float:
+                                    market_price: float, is_call: bool, option_data=None) -> float:
         """使用Newton-Raphson方法计算隐含波动率"""
         try:
             # 初始猜测值
             sigma = 0.3  # 30%
             
+            # 🔥 修复缓存键错误：使用标的symbol而非价格
             # 0DTE期权使用历史波动率作为初始值
             if T < 1/365:  # 小于1天
-                sigma = self.volatility_cache.get(f"underlying_{S}", 0.5)  # 默认50%
+                # 从期权symbol提取标的symbol (假设格式: QQQ_20250117_CALL_570)
+                underlying_symbol = option_data.symbol.split('_')[0] if hasattr(option_data, 'symbol') else 'DEFAULT'
+                sigma = self.volatility_cache.get(f"underlying_{underlying_symbol}", 0.5)  # 默认50%
             
             max_iterations = 50
             tolerance = 1e-6
@@ -355,9 +364,11 @@ class GreeksCalculator:
                 
                 sigma = sigma_new
             
-            # 对于0DTE期权，确保波动率合理
-            if T < 1/365:
-                sigma = max(0.2, min(2.0, sigma))  # 20%-200%范围
+            # 🔥 修复强制限制问题：只在异常情况下限制
+            # 对于0DTE期权，只有在计算失败时才使用默认范围
+            if T < 1/365 and (sigma <= 0 or sigma > 10.0):  # 只限制明显异常值
+                logger.warning(f"0DTE期权IV异常: {sigma:.4f}, 使用默认值")
+                sigma = 0.5  # 50%默认值
             
             return sigma
             

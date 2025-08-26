@@ -293,9 +293,16 @@ class OptionAnalyzer:
                 logger.warning(f"Gamma为负值: {option.symbol}, Gamma: {option.gamma}")
                 return False
             
-            # Theta合理性(通常为负，除非深度ITM的Put)
-            if option.theta > 0.1:  # 允许轻微正值
-                logger.warning(f"Theta异常偏高: {option.symbol}, Theta: {option.theta}")
+            # 🔥 修复Theta验证逻辑：Call和Put分别验证
+            if option.right.upper() == 'CALL':
+                # Call期权Theta应该总是负值
+                if option.theta > 0:
+                    logger.warning(f"Call Theta异常为正: {option.symbol}, Theta: {option.theta}")
+                    return False
+            else:  # PUT
+                # Put期权可能有正Theta (深度ITM时)
+                if option.theta > 0.1:  # 允许轻微正值
+                    logger.warning(f"Put Theta异常偏高: {option.symbol}, Theta: {option.theta}")
             
             # IV合理性检验(0.05-2.0之间) - 但对0DTE期权放宽限制
             if not (0.01 <= option.implied_vol <= 5.0):  # 0DTE可能出现极端IV
@@ -311,15 +318,20 @@ class OptionAnalyzer:
     def _is_high_gamma_risk(self, option: OptionData, current_price: float) -> bool:
         """检测0DTE高Gamma风险"""
         try:
-            # ATM期权的高Gamma检测
+            # 🔥 基于QQQ期权实证数据的Gamma风险阈值
             moneyness = abs(option.strike - current_price) / current_price
             
-            # ATM附近(±2%)且Gamma>0.1的期权有Pin Risk
-            if moneyness <= 0.02 and option.gamma > 0.1:
+            # 基于QQQ期权历史数据的动态阈值
+            # ATM期权Gamma通常0.01-0.05，0DTE时可达0.2+
+            atm_threshold = 0.05   # ATM Gamma基准
+            extreme_threshold = 0.15  # 极端Gamma阈值
+            
+            # ATM附近(±1%)的Pin Risk检测
+            if moneyness <= 0.01 and option.gamma > atm_threshold:
                 return True
             
-            # 任何期权Gamma>0.3都是极端情况
-            if option.gamma > 0.3:
+            # 任何期权Gamma超过极端阈值
+            if option.gamma > extreme_threshold:
                 return True
                 
             return False
