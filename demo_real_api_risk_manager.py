@@ -2679,13 +2679,14 @@ class RealAPIRiskManagerDemo:
             # 🔥 使用专业期权分析器进行评分和选择
             print(f"🔍 使用专业期权分析器分析 {option_type} 期权 (共{len(candidate_options)}个候选)")
             
-            # 将期权列表转换为DataFrame格式
+            # 将期权列表转换为DataFrame格式 (添加期权分析器所需的字段)
             option_data = []
             for opt in candidate_options:
                 option_data.append({
                     'symbol': opt.symbol,
                     'strike': opt.strike,
                     'right': opt.right,
+                    'put_call': opt.right,  # 🔧 添加数据验证所需的put_call字段
                     'expiry': getattr(opt, 'expiry', '2024-01-01'),
                     'latest_price': opt.latest_price,
                     'bid': opt.bid,
