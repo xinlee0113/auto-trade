@@ -297,8 +297,8 @@ class OptionAnalyzer:
             if option.theta > 0.1:  # 允许轻微正值
                 logger.warning(f"Theta异常偏高: {option.symbol}, Theta: {option.theta}")
             
-            # IV合理性检验(0.05-2.0之间)
-            if not (0.05 <= option.implied_vol <= 2.0):
+            # IV合理性检验(0.05-2.0之间) - 但对0DTE期权放宽限制
+            if not (0.01 <= option.implied_vol <= 5.0):  # 0DTE可能出现极端IV
                 logger.warning(f"IV异常: {option.symbol}, IV: {option.implied_vol}")
                 return False
             
