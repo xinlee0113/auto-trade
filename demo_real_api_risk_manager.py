@@ -964,10 +964,12 @@ class RealTimeSignalGenerator:
             return 0.0
     
     def _get_market_hours_status(self) -> Tuple[bool, str]:
-        """判断美股市场时间状态 - 专注QQQ交易
+        """判断美股期权交易时间状态 - 专注QQQ期权交易
+        
+        注意: 美股期权只能在正常交易时间交易，不支持盘前盘后
         
         Returns:
-            tuple: (是否为交易时间, 时间描述)
+            tuple: (是否为期权交易时间, 时间描述)
         """
         import datetime
         from datetime import timezone, timedelta
@@ -982,13 +984,11 @@ class RealTimeSignalGenerator:
         if weekday >= 5:  # 周末
             return False, f"美东时间: {et_time.strftime('%H:%M:%S')} (周末休市)"
         
-        # 美股交易时间：09:30-16:00 EDT
+        # 美股期权交易时间：09:30-16:00 EDT (严格限制)
         if 9 <= hour < 16 and not (hour == 9 and minute < 30):
-            return True, f"美东时间: {et_time.strftime('%H:%M:%S')} (盘中)"
-        elif 4 <= hour < 20:  # 扩展时间包含盘前盘后
-            return False, f"美东时间: {et_time.strftime('%H:%M:%S')} (盘前/盘后)"
+            return True, f"美东时间: {et_time.strftime('%H:%M:%S')} (期权交易时间)"
         else:
-            return False, f"美东时间: {et_time.strftime('%H:%M:%S')} (非交易时间)"
+            return False, f"美东时间: {et_time.strftime('%H:%M:%S')} (期权非交易时间)"
 
     def _make_signal_decision(self, entry_score: float, exit_score: float, indicators: TechnicalIndicators) -> Tuple[str, float, float, List[str]]:
         """0DTE期权专用信号决策 - 动态阈值体系"""
@@ -1003,21 +1003,18 @@ class RealTimeSignalGenerator:
         
         print(f"🕒 {time_description}")
         
-        # 🎯 0DTE动态阈值设计
-        if is_pre_post_market:
-            # 盘前盘后：降低阈值，增加信号频率
-            strong_threshold = 50   # 原80 → 50
-            standard_threshold = 35  # 原60 → 35
-            weak_threshold = 25     # 原40 → 25
-            exit_threshold = 45     # 原60 → 45
-            reasons.append("盘前/盘后动态阈值")
-        else:
-            # 盘中：标准阈值
-            strong_threshold = 65   # 原80 → 65  
-            standard_threshold = 50  # 原60 → 50
-            weak_threshold = 35     # 原40 → 35
-            exit_threshold = 50     # 原60 → 50
-            reasons.append("盘中标准阈值")
+        # 🎯 期权交易时间验证 - 美股期权仅在9:30-16:00交易
+        if not is_market_hours:
+            # 非期权交易时间：不生成任何交易信号
+            reasons.append("期权非交易时间，禁止信号生成")
+            return "HOLD", 0.0, 0.0, reasons
+        
+        # ✅ 期权交易时间内 - 使用标准阈值
+        strong_threshold = 65   # 原80 → 65  
+        standard_threshold = 50  # 原60 → 50
+        weak_threshold = 35     # 原40 → 35
+        exit_threshold = 50     # 原60 → 50
+        reasons.append("期权交易时间-标准阈值")
         
         # 🚪 出场信号优先（风控）
         if exit_score >= exit_threshold:
@@ -1590,8 +1587,7 @@ class RealAPIRiskManagerDemo:
                     print(f"⏱️ [动态频控] 距上次交易{time_since_last:.1f}秒，等待{remaining:.1f}秒后再交易 (间隔:{min_interval}s)")
                     return
             
-            # 🔒 预先锁定交易时间，防止并发交易
-            self.last_trade_time = current_time
+            # 🔒 暂时不更新交易时间，等交易成功后再更新
             
             # 📊 开仓-平仓配对检查：避免重复开仓
             if self.is_position_open:
@@ -1694,16 +1690,20 @@ class RealAPIRiskManagerDemo:
             
 
         
-            # 📊 记录开仓持仓
-            # 根据信号类型记录对应的持仓
-            if signal.signal_type == "BUY" and selected_option['put_call'].upper() == "CALL":
+            # 📊 记录开仓持仓 (修复逻辑错误)
+            # BUY信号买入CALL，SELL信号买入PUT，都是买入操作
+            if signal.signal_type == "BUY":
+                # 看涨信号 - 买入CALL期权
                 position_id = self._record_new_position(selected_option, "CALL", self.fixed_quantity, market_price)
                 if position_id:
-                    print(f"📝 记录CALL持仓: {position_id}")
-            elif signal.signal_type == "SELL" and selected_option['put_call'].upper() == "PUT":
+                    print(f"📝 记录CALL买入持仓: {position_id}")
+            elif signal.signal_type == "SELL":
+                # 看跌信号 - 买入PUT期权
                 position_id = self._record_new_position(selected_option, "PUT", self.fixed_quantity, market_price)
                 if position_id:
-                    print(f"📝 记录PUT持仓: {position_id}")
+                    print(f"📝 记录PUT买入持仓: {position_id}")
+            else:
+                print(f"⚠️ 未知信号类型: {signal.signal_type}")
             
             # 显示当前持仓状态
             self._print_position_summary()
@@ -1711,7 +1711,10 @@ class RealAPIRiskManagerDemo:
             # 🔍 检查是否需要平仓 (开仓后)
             self._check_auto_close_conditions()
             
-            print(f"✅ 自动交易完成，下次交易需等待30秒\n")
+            # ✅ 交易成功，更新最后交易时间
+            self.last_trade_time = current_time
+            
+            print(f"✅ 自动交易完成，下次交易需等待{self._calculate_dynamic_interval(signal):.0f}秒\n")
             
         except Exception as e:
             print(f"❌ 自动交易失败: {e}")
