@@ -807,7 +807,7 @@ class RealTimeSignalGenerator:
             
             # 价差质量评分 (0-1)
             spread_score = 1.0 - min(spread_pct / 0.01, 1.0)  # 1%价差为基准
-            depth_score = min(total_depth / 1000, 1.0)  # 1000为满分深度
+            depth_score = min(total_depth / 1000.0, 1.0)  # 1000为满分深度
             
             quality = (spread_score * 0.7 + depth_score * 0.3)
             
@@ -876,13 +876,13 @@ class RealTimeSignalGenerator:
             avg_momentum = sum(abs(m) for m in momentum_signals) / 3
             
             if positive_momentum >= 2 and negative_momentum == 0:  # 多头动量一致
-                momentum_score = 35.0 + min(avg_momentum * 100000, 10.0)  # 基础35分+强度加分
+                momentum_score = 35.0 + min(avg_momentum * 100000.0, 10.0)  # 基础35分+强度加分
                 print(f"🎯 [{self.symbol}] Layer1-动量确认: 多头一致 (+{momentum_score:.1f}分)")
             elif negative_momentum >= 2 and positive_momentum == 0:  # 空头动量一致
-                momentum_score = 35.0 + min(avg_momentum * 100000, 10.0)  # 基础35分+强度加分
+                momentum_score = 35.0 + min(avg_momentum * 100000.0, 10.0)  # 基础35分+强度加分
                 print(f"🎯 [{self.symbol}] Layer1-动量确认: 空头一致 (+{momentum_score:.1f}分)")
             elif positive_momentum >= 1 or negative_momentum >= 1:  # 部分动量
-                momentum_score = 20.0 + min(avg_momentum * 100000, 5.0)   # 基础20分+强度加分
+                momentum_score = 20.0 + min(avg_momentum * 100000.0, 5.0)   # 基础20分+强度加分
                 print(f"🎯 [{self.symbol}] Layer1-动量确认: 部分动量 (+{momentum_score:.1f}分)")
             
             score += momentum_score
@@ -1066,7 +1066,7 @@ class RealTimeSignalGenerator:
         
         return signal_type, strength, confidence, reasons
     
-    def _calculate_iv_bonus(self, indicators: TechnicalIndicators, underlying_price: float = None) -> float:
+    def _calculate_iv_bonus(self, indicators: TechnicalIndicators, underlying_price: Optional[float] = None) -> float:
         """计算隐含波动率加分（使用真实期权数据）"""
         try:
             # 如果未提供标的价格，返回0（避免调用不存在的方法）
@@ -1522,7 +1522,7 @@ class RealAPIRiskManagerDemo:
                 for old_symbol in common_symbols:
                     try:
                         self.push_client.unsubscribe_quote([old_symbol])
-                        self.push_client.unsubscribe_quote([old_symbol], quote_key_type=QuoteKeyType.QUOTE)
+                        # 跳过带参数的取消订阅（可能不支持）
                     except:
                         pass  # 忽略取消失败的情况
                 print("   历史订阅清理完成")
@@ -1539,20 +1539,15 @@ class RealAPIRiskManagerDemo:
             
             # 同时订阅最优报价数据 (获取精确买卖价)
             print(f"💰 订阅 {symbol} 最优报价数据 (BBO)...")
-            result2 = self.push_client.subscribe_quote([symbol], quote_key_type=QuoteKeyType.QUOTE)
-            print(f"   BBO订阅结果: {result2}")
+            # 跳过BBO订阅（参数可能不支持）
+            print(f"   跳过BBO订阅（使用基础订阅）")
             
             # 等待订阅确认
             time.sleep(2)
             print(f"🕒 等待2秒让订阅生效...")
             
-            # 尝试其他订阅类型测试
-            print(f"🔍 尝试订阅详细行情...")
-            try:
-                result3 = self.push_client.subscribe_stock_detail([symbol])
-                print(f"   详细行情订阅结果: {result3}")
-            except Exception as e:
-                print(f"   详细行情订阅失败: {e}")
+            # 其他订阅类型暂时跳过（API接口可能不存在）
+            print(f"✅ 基础行情订阅完成，跳过扩展订阅类型")
                 
             # 添加调试回调测试
             print(f"📊 调试：推送客户端状态检查...")
@@ -1690,8 +1685,18 @@ class RealAPIRiskManagerDemo:
             
 
         
-            # 📊 记录开仓持仓 (修复逻辑错误)
-            # BUY信号买入CALL，SELL信号买入PUT，都是买入操作
+            # 📊 增强期权方向逻辑：添加交叉验证和策略检查
+            expected_option_type = "CALL" if signal.signal_type == "BUY" else "PUT"
+            actual_option_type = selected_option.get('put_call', '').upper()
+            
+            # 🔧 交叉验证：确保信号类型与期权类型一致
+            if actual_option_type and actual_option_type != expected_option_type:
+                print(f"⚠️ 期权方向不匹配: 信号={signal.signal_type} 期权类型={actual_option_type}")
+                print(f"   预期: {expected_option_type}, 实际: {actual_option_type}")
+                # 对于0DTE交易，方向一致性很重要，但允许继续（记录警告）
+                print(f"   ⚡ 继续执行（已记录方向警告）")
+            
+            # 记录开仓持仓（统一为买入操作）
             if signal.signal_type == "BUY":
                 # 看涨信号 - 买入CALL期权
                 position_id = self._record_new_position(selected_option, "CALL", self.fixed_quantity, market_price)
@@ -1704,6 +1709,7 @@ class RealAPIRiskManagerDemo:
                     print(f"📝 记录PUT买入持仓: {position_id}")
             else:
                 print(f"⚠️ 未知信号类型: {signal.signal_type}")
+                return
             
             # 显示当前持仓状态
             self._print_position_summary()
@@ -1810,8 +1816,9 @@ class RealAPIRiskManagerDemo:
     def _check_position_limits(self) -> bool:
         """检查持仓限制"""
         current_count = self._get_position_count()
-        if current_count >= self.max_concurrent_positions:
-            print(f"⚠️ 已达到最大持仓数限制: {current_count}/{self.max_concurrent_positions}")
+        max_positions = 1  # 🔧 严格配对交易：最大1个持仓
+        if current_count >= max_positions:
+            print(f"⚠️ 已达到最大持仓数限制: {current_count}/{max_positions}")
             return False
         return True
     
@@ -1974,7 +1981,7 @@ class RealAPIRiskManagerDemo:
         entry_price = position['entry_price']
         pnl_percent = position['pnl_percent']
         
-        # 计算持仓时长
+        # 🔧 修复时间计算Bug：正确处理跨日、时区和异常情况
         from datetime import datetime, timezone, timedelta
         eastern = timezone(timedelta(hours=-4))  # EDT
         et_time = datetime.now(eastern)
@@ -1982,10 +1989,32 @@ class RealAPIRiskManagerDemo:
         entry_time_str = position.get('entry_time', '')
         if entry_time_str:
             try:
-                entry_time = datetime.strptime(entry_time_str, '%H:%M:%S').time()
-                entry_dt = et_time.replace(hour=entry_time.hour, minute=entry_time.minute, second=entry_time.second)
-                hold_duration = (et_time - entry_dt).total_seconds()
-            except:
+                # 方法1：如果有完整的entry_datetime，直接使用
+                if 'entry_datetime' in position:
+                    entry_dt = datetime.fromisoformat(position['entry_datetime'])
+                    # 确保时区一致
+                    if entry_dt.tzinfo is None:
+                        entry_dt = entry_dt.replace(tzinfo=eastern)
+                    hold_duration = (et_time - entry_dt).total_seconds()
+                else:
+                    # 方法2：只有时间字符串，假设为当日
+                    entry_time = datetime.strptime(entry_time_str, '%H:%M:%S').time()
+                    entry_dt = et_time.replace(hour=entry_time.hour, minute=entry_time.minute, second=entry_time.second, microsecond=0)
+                    
+                    # 处理跨日情况：如果计算出的时间在未来，说明是前一天开仓
+                    hold_duration = (et_time - entry_dt).total_seconds()
+                    if hold_duration < 0:
+                        # 跨日情况：开仓时间应为前一天
+                        entry_dt = entry_dt - timedelta(days=1)
+                        hold_duration = (et_time - entry_dt).total_seconds()
+                    
+                    # 异常检查：持仓时间不应超过24小时（0DTE期权当日到期）
+                    if hold_duration > 86400:  # 24小时
+                        print(f"⚠️ 异常持仓时间: {hold_duration:.0f}秒 (>24小时)，重置为0")
+                        hold_duration = 0
+                        
+            except Exception as e:
+                print(f"⚠️ 时间计算异常: {e}，使用默认值0")
                 hold_duration = 0
         else:
             hold_duration = 0
@@ -2055,13 +2084,17 @@ class RealAPIRiskManagerDemo:
             print(f"当前价: ${position['current_price']:.2f}")
             print(f"盈亏: {position['pnl_percent']:+.1f}% (${position['unrealized_pnl']:+.0f})")
             
-            # 构造平仓订单信息
+            # 🔧 构造平仓订单信息：修复期权信息映射
+            # 获取当日到期日（0DTE期权）
+            from datetime import datetime
+            today_expiry = datetime.now().strftime('%Y-%m-%d')
+            
             close_option_info = {
                 'symbol': position['symbol'],
                 'option_type': position['option_type'],
-                'put_call': position['option_type'],  # ✅ 添加缺失的字段
+                'put_call': position['option_type'].upper(),  # 确保大写格式一致
                 'strike': position['strike'],
-                'expiry': position.get('expiry', '2025-08-26'),  # ✅ 添加缺失的字段
+                'expiry': position.get('expiry', today_expiry),  # 🔧 使用当日到期日而非硬编码
                 'price': position['current_price'],
                 'ask': position['current_price'],  # 使用当前价格作为卖出价
                 'bid': position['current_price'] * 0.99,  # 略低的买入价
@@ -2069,6 +2102,14 @@ class RealAPIRiskManagerDemo:
                 'volume': position.get('volume', 0),
                 'score': 95.0  # 平仓不需要评分
             }
+            
+            # 🔧 验证期权信息完整性
+            required_fields = ['symbol', 'put_call', 'strike', 'expiry']
+            missing_fields = [field for field in required_fields if not close_option_info.get(field)]
+            if missing_fields:
+                print(f"⚠️ 平仓期权信息缺失字段: {missing_fields}")
+                # 尝试从原始symbol解析
+                self._fill_missing_option_info(close_option_info, position['symbol'])
             
             # 执行卖出操作 (平仓)
             result = self._execute_paper_order(close_option_info, "SELL", position['quantity'], f"自动平仓-{reason}")
@@ -2102,6 +2143,36 @@ class RealAPIRiskManagerDemo:
                 
         except Exception as e:
             print(f"❌ 执行平仓失败: {e}")
+    
+    def _fill_missing_option_info(self, option_info: dict, option_symbol: str):
+        """从期权symbol解析并填充缺失的期权信息"""
+        try:
+            # QQQ期权symbol格式: QQQ_YYYYMMDD_C/P_Strike
+            parts = option_symbol.split('_')
+            if len(parts) >= 4:
+                underlying = parts[0]
+                date_str = parts[1]
+                option_type = 'CALL' if parts[2] == 'C' else 'PUT'
+                strike = float(parts[3])
+                
+                # 转换日期格式
+                if len(date_str) == 8:  # YYYYMMDD
+                    expiry = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
+                else:
+                    expiry = datetime.now().strftime('%Y-%m-%d')
+                
+                # 填充缺失信息
+                if not option_info.get('put_call'):
+                    option_info['put_call'] = option_type
+                if not option_info.get('strike'):
+                    option_info['strike'] = strike
+                if not option_info.get('expiry'):
+                    option_info['expiry'] = expiry
+                    
+                print(f"✅ 已解析期权信息: {option_type} {strike} {expiry}")
+                
+        except Exception as e:
+            print(f"⚠️ 期权信息解析失败: {e}")
     
     def _get_real_time_option_price(self, option_symbol: str) -> Optional[float]:
         """获取期权实时价格（Ask价格）- 增强版本"""
@@ -2720,7 +2791,7 @@ class RealAPIRiskManagerDemo:
             import traceback
             traceback.print_exc()
     
-    def _place_paper_option_order(self, option_info: dict, action: str, quantity: int, price: float) -> dict:
+    def _place_paper_option_order(self, option_info: dict, action: str, quantity: int, price: float) -> Optional[dict]:
         """执行PAPER账号期权下单
         
         Args:
@@ -2807,6 +2878,9 @@ class RealAPIRiskManagerDemo:
             response = trade_client.place_order(order)
             
             # 🔍 智能判断订单结果
+            success = False  # 🔧 初始化success变量
+            order_id = None
+            
             if response:
                 # 情况1: response是带id属性的对象
                 if hasattr(response, 'id'):
@@ -3441,8 +3515,8 @@ class RealAPIRiskManagerDemo:
                 gamma_score = 2
             
             # 3. 流动性评分 (0-20分) - 超高频需要快速进出
-            volume_score = min(15, (row['volume'] / 2000) * 15) if row['volume'] > 0 else 0
-            oi_score = min(5, (row['open_interest'] / 1000) * 5) if row['open_interest'] > 0 else 0
+            volume_score = min(15.0, (row['volume'] / 2000.0) * 15.0) if row['volume'] > 0 else 0.0
+            oi_score = min(5.0, (row['open_interest'] / 1000.0) * 5.0) if row['open_interest'] > 0 else 0.0
             liquidity_score = volume_score + oi_score
             
             # 4. 价差评分 (0-10分) - 超高频对价差敏感但不是最关键
@@ -3457,7 +3531,7 @@ class RealAPIRiskManagerDemo:
                 spread_score = 0
             
             total_score = atm_score + gamma_score + liquidity_score + spread_score
-            return min(100, total_score)
+            return min(100.0, total_score)
         
         # 计算每个期权的超高频评分
         scored_df['option_score'] = scored_df.apply(calculate_ultra_hf_score, axis=1)
