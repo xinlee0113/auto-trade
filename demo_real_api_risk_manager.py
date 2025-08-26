@@ -1939,18 +1939,18 @@ class RealAPIRiskManagerDemo:
         else:
             hold_duration = 0
         
-        # 1️⃣ 快速止损检查 (0DTE期权：15%止损)
-        stop_loss_threshold = -15.0  # 更严格的止损
+        # 1️⃣ 严格止损检查 (0DTE期权：8%快速止损)
+        stop_loss_threshold = -8.0  # 🎯 专业级风控：8%止损更符合0DTE特性
         if pnl_percent <= stop_loss_threshold:
             return f"止损平仓 (亏损{pnl_percent:.1f}%)"
         
-        # 2️⃣ 动态止盈检查 (根据持仓时间调整)
-        if hold_duration < 120:  # 2分钟内：快速获利了结
-            take_profit_threshold = 25.0  # 25%止盈
-        elif hold_duration < 300:  # 5分钟内：中等获利目标
-            take_profit_threshold = 50.0  # 50%止盈
-        else:  # 5分钟后：更高获利要求
-            take_profit_threshold = 80.0  # 80%止盈
+        # 2️⃣ 实用动态止盈 (基于0DTE实际波动特征优化)
+        if hold_duration < 90:  # 1.5分钟内：快进快出
+            take_profit_threshold = 12.0  # 🎯 现实目标：12%快速获利
+        elif hold_duration < 240:  # 4分钟内：中等获利
+            take_profit_threshold = 20.0  # 🎯 可达成目标：20%中期获利
+        else:  # 4分钟后：较高获利要求
+            take_profit_threshold = 35.0  # 🎯 挑战目标：35%长期获利
             
         if pnl_percent >= take_profit_threshold:
             return f"止盈平仓 (盈利{pnl_percent:.1f}%, 持仓{hold_duration:.0f}秒)"
@@ -1978,18 +1978,19 @@ class RealAPIRiskManagerDemo:
         return None  # 不需要平仓
     
     def print_risk_control_summary(self):
-        """显示优化后的风险控制参数摘要"""
-        print(f"\n🛡️ === 0DTE期权风险控制策略 ===")
-        print(f"📉 止损策略: -15% (快速止损，避免巨大损失)")
-        print(f"📈 动态止盈:")
-        print(f"   • 2分钟内: +25% (快速获利了结)")
-        print(f"   • 5分钟内: +50% (中等获利目标)")  
-        print(f"   • 5分钟后: +80% (更高获利要求)")
+        """显示专业级优化的风险控制参数摘要"""
+        print(f"\n🛡️ === 0DTE期权专业级风控策略 ===")
+        print(f"📉 止损策略: -8% (专业级快速止损，控制0DTE风险)")
+        print(f"📈 实用动态止盈:")
+        print(f"   • 1.5分钟内: +12% (快进快出，现实目标)")
+        print(f"   • 4分钟内: +20% (中期获利，可达成目标)")  
+        print(f"   • 4分钟后: +35% (挑战目标，时间压力增加)")
         print(f"⏰ 时间管理:")
         print(f"   • 最大持仓: 8分钟 (避免时间衰减)")
         print(f"   • 盈利保护: 盈利15%后持仓5分钟自动平仓")
         print(f"   • 强制平仓: 15:45 EDT后")
-        print(f"🎯 适用场景: 0DTE期权30秒-8分钟短期交易")
+        print(f"🎯 适用场景: QQQ 0DTE期权30秒-8分钟高频交易")
+        print(f"💡 专业级优化: 基于0DTE实际波动特征调整")
         print("=" * 50)
     
     def _execute_auto_close(self, position_id: str, position: dict, reason: str):
