@@ -323,14 +323,22 @@ class GreeksCalculator:
             # 初始猜测值
             sigma = 0.3  # 30%
             
-            # 🔥 修复缓存键错误：使用标的symbol而非价格
-            # 0DTE期权使用历史波动率作为初始值
-            if T < 1/365:  # 小于1天
-                # 从期权symbol提取标的symbol (假设格式: QQQ_20250117_CALL_570)
+            # 🔥 修复0DTE缓存策略：使用实时ATM期权IV作为初始值
+            if T < 1/365:  # 0DTE期权
                 underlying_symbol = option_data.symbol.split('_')[0] if hasattr(option_data, 'symbol') else 'DEFAULT'
-                sigma = self.volatility_cache.get(f"underlying_{underlying_symbol}", 0.5)  # 默认50%
+                
+                # 尝试获取实时ATM期权IV作为更准确的初始值
+                atm_iv = self._get_atm_implied_volatility(underlying_symbol, S)
+                if atm_iv and atm_iv > 0:
+                    sigma = atm_iv
+                    logger.info(f"使用实时ATM-IV初始值: {sigma:.3f}")
+                else:
+                    # fallback到缓存的历史值
+                    sigma = self.volatility_cache.get(f"underlying_{underlying_symbol}", 0.5)
+                    logger.info(f"使用缓存IV初始值: {sigma:.3f}")
             
-            max_iterations = 50
+            # 🔥 优化迭代次数：0DTE期权使用更少迭代提升性能
+            max_iterations = 20 if T < 1/365 else 50  # 0DTE用20次，其他用50次
             tolerance = 1e-6
             
             for i in range(max_iterations):
@@ -612,6 +620,26 @@ class PortfolioGreeksManager:
             
         except Exception as e:
             logger.error(f"投资组合Greeks计算失败: {e}")
+            return None
+    
+    def _get_atm_implied_volatility(self, underlying_symbol: str, spot_price: float) -> Optional[float]:
+        """获取ATM期权的实时隐含波动率作为更准确的初始值"""
+        try:
+            # 这里需要外部API接口支持，暂时返回None使用fallback
+            # 实际实现中可以调用Tiger API获取ATM期权的IV
+            
+            # 示例实现逻辑（需要API支持）:
+            # 1. 找到最接近spot_price的执行价
+            # 2. 获取该执行价Call/Put期权的IV
+            # 3. 取平均值作为ATM-IV
+            
+            # TODO: 集成实际的ATM-IV获取逻辑
+            logger.debug(f"尝试获取{underlying_symbol}@{spot_price:.2f}的ATM-IV")
+            
+            return None  # 暂时返回None，使用历史缓存
+            
+        except Exception as e:
+            logger.warning(f"获取ATM-IV失败: {e}")
             return None
     
     def get_portfolio_risk_metrics(self) -> Dict[str, float]:

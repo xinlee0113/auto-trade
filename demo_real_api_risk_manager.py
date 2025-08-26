@@ -1611,22 +1611,26 @@ class RealAPIRiskManagerDemo:
                 market_price = market_ask
                 print(f"🔄 更新期权市价: ${market_price:.2f} (实时Ask)")
             else:
-                # 🎯 智能价格选择策略：优先级 Ask > Latest > Bid，选择最优买入价
+                # 🎯 智能价格选择策略：优化买入执行成本 Latest > Mid > Ask
                 option_ask = selected_option.get('ask', 0)
                 option_bid = selected_option.get('bid', 0) 
                 option_latest = selected_option.get('latest_price', 0)
                 option_price = selected_option.get('price', 0)
                 
-                # 智能价格选择：优先Ask，其次Latest，最后Price
-                if option_ask and option_ask > 0:
+                # 🔥 修复价格选择逻辑：买入时优先成交价，降低执行成本
+                if option_latest and option_latest > 0:
+                    market_price = option_latest
+                    price_source = f"Latest=${option_latest:.3f} (最优)"
+                elif option_bid > 0 and option_ask > 0:
+                    # 使用Mid价格，平衡执行成本
+                    market_price = (option_bid + option_ask) / 2
+                    price_source = f"Mid=${market_price:.3f} (bid/ask均价)"
+                elif option_ask and option_ask > 0:
                     market_price = option_ask
-                    price_source = f"Ask=${option_ask:.3f}"
-                elif option_latest and option_latest > 0:
-                    market_price = option_latest  
-                    price_source = f"Latest=${option_latest:.3f}"
+                    price_source = f"Ask=${option_ask:.3f} (保守)"
                 elif option_price and option_price > 0:
                     market_price = option_price
-                    price_source = f"Price=${option_price:.3f}"
+                    price_source = f"Price=${option_price:.3f} (备用)"
                 else:
                     # 极端情况：所有价格都为0，使用最小有效价格
                     market_price = 0.01
@@ -2003,17 +2007,20 @@ class RealAPIRiskManagerDemo:
         # 注意：VIX regime应该从主类获取，或使用默认值
         try:
             vix_regime = self._get_vix_regime()
-        except AttributeError:
-            vix_regime = "NORMAL_VOL"  # 默认正常波动率
+        except (AttributeError, Exception) as e:
+            # 🔥 修复VIX异常处理：使用QQQ历史波动率智能推断VIX体制
+            vix_regime = self._estimate_vix_regime_from_qqq()
+            print(f"⚠️ VIX获取失败: {e}, 使用QQQ波动率推断: {vix_regime}")
         
         # 1️⃣ 动态止损检查 (基于Delta和VIX体制)
         base_stop_loss = -8.0  # 基础止损8%
         
-        # 根据Delta调整止损：Delta越高风险越大，止损越严格
+        # 🔥 修复Delta调整公式：采用更保守的调整系数
         delta_adjustment = 0
         if position_greeks and position_greeks.get('delta'):
             abs_delta = abs(position_greeks['delta'])
-            delta_adjustment = (abs_delta - 0.5) * 10  # Delta偏离0.5越多，调整越大
+            # 修复：将激进的*10系数降为*3，避免过早止损
+            delta_adjustment = (abs_delta - 0.5) * 3  # Delta偏离0.5越多，调整越大(保守系数)
         
         # 根据VIX体制调整止损
         vix_adjustment = 0
@@ -2044,9 +2051,10 @@ class RealAPIRiskManagerDemo:
         if current_hour >= 15 and current_minute >= 45:
             return f"临近收盘强制平仓 (15:45后)"
         
-        # 3.2 时间衰减平仓：持仓超过8分钟
-        if hold_duration > 480:  # 8分钟
-            return f"时间衰减平仓 (持仓{hold_duration:.0f}秒超时)"
+        # 🔥 修复时间限制硬编码：基于Theta和VIX动态调整时间限制
+        dynamic_time_limit = self._calculate_dynamic_time_limit(position_greeks, vix_regime)
+        if hold_duration > dynamic_time_limit:
+            return f"动态时间平仓 (持仓{hold_duration:.0f}秒超{dynamic_time_limit:.0f}秒限制)"
         
         # 3.3 快速盈利保护：盈利后持仓过久开始衰减
         if pnl_percent > 15 and hold_duration > 300:  # 盈利15%后持仓5分钟
@@ -2206,6 +2214,83 @@ class RealAPIRiskManagerDemo:
         except Exception as e:
             print(f"⚠️ 动态止盈计算失败: {e}")
             return 20.0  # 返回保守的止盈阈值
+    
+    def _estimate_vix_regime_from_qqq(self) -> str:
+        """基于QQQ历史波动率推断VIX体制 - 智能fallback机制"""
+        try:
+            # 使用信号生成器的价格历史(如果有)
+            if (hasattr(self, 'push_signal_generator') and self.push_signal_generator and
+                hasattr(self.push_signal_generator, 'price_history')):
+                price_history = list(self.push_signal_generator.price_history)
+                if len(price_history) >= 10:
+                    # 计算短期波动率(基于最近10个价格点)
+                    prices = [p for p in price_history[-10:]]
+                    returns = []
+                    for i in range(1, len(prices)):
+                        ret = (prices[i] - prices[i-1]) / prices[i-1]
+                        returns.append(ret)
+                    
+                    if returns:
+                        import numpy as np
+                        daily_vol = np.std(returns) * np.sqrt(252)  # 年化波动率
+                        
+                        # 基于QQQ波动率推断VIX体制
+                        # QQQ正常波动率约15-25%，对应VIX 15-25
+                        estimated_vix = daily_vol * 100  # 转换为VIX风格数值
+                        
+                        if estimated_vix < 15:
+                            return "LOW_VOL"
+                        elif estimated_vix < 25:
+                            return "NORMAL_VOL" 
+                        elif estimated_vix < 35:
+                            return "HIGH_VOL"
+                        else:
+                            return "EXTREME_VOL"
+            
+            # 如果没有足够历史数据，使用保守默认值
+            print("📊 缺少QQQ历史数据，使用默认NORMAL_VOL")
+            return "NORMAL_VOL"
+            
+        except Exception as e:
+            print(f"❌ QQQ波动率计算失败: {e}")
+            return "NORMAL_VOL"  # 最保守的默认值
+    
+    def _calculate_dynamic_time_limit(self, position_greeks: dict, vix_regime: str) -> float:
+        """计算动态时间限制 - 基于Theta衰减和市场波动率 (快进快出优化)"""
+        try:
+            # 🔥 修复为快进快出范围：4分钟基础，2-6分钟动态范围
+            base_time_limit = 240.0  # 基础4分钟 (秒) - 符合快进快出
+            
+            # 基于Theta调整时间限制 (调整幅度减小)
+            theta_adjustment = 0
+            if position_greeks and position_greeks.get('theta'):
+                theta = abs(position_greeks['theta'])
+                # Theta越大，时间衰减越快，应该更早平仓
+                if theta > 0.1:  # 高Theta衰减
+                    theta_adjustment = -60   # 减少1分钟 (而非2分钟)
+                elif theta > 0.05:  # 中等Theta衰减
+                    theta_adjustment = -30   # 减少30秒 (而非1分钟)
+                # 低Theta可以持仓更久 (但限制在快进快出范围内)
+            
+            # 基于VIX体制调整 (调整幅度减小)
+            vix_adjustment = 0
+            if vix_regime == "HIGH_VOL":
+                vix_adjustment = 30   # 高波动环境，延长30秒
+            elif vix_regime == "EXTREME_VOL":
+                vix_adjustment = 60   # 极端环境，延长1分钟 (而非2分钟)
+            elif vix_regime == "LOW_VOL":
+                vix_adjustment = -30  # 低波动环境，提前30秒
+            
+            dynamic_limit = base_time_limit + theta_adjustment + vix_adjustment
+            
+            # 🔥 修复范围限制：严格控制在快进快出范围 (2-6分钟)
+            dynamic_limit = max(120, min(360, dynamic_limit))  # 2-6分钟，符合快进快出
+            
+            return dynamic_limit
+            
+        except Exception as e:
+            print(f"⚠️ 动态时间限制计算失败: {e}")
+            return 240.0  # 返回默认4分钟 (符合快进快出)
     
     def print_risk_control_summary(self):
         """显示专业级优化的风险控制参数摘要"""
