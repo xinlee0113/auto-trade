@@ -272,6 +272,11 @@ class RealTimeSignalGenerator:
         try:
             self._update_push_statistics()
             
+            # 🎯 关键修复：验证标的符号匹配
+            if hasattr(quote_data, 'symbol') and quote_data.symbol != self.symbol:
+                # 静默忽略不匹配的标的数据，避免日志污染
+                return None
+            
             # 解析价格数据
             price = self._extract_price_from_quote(quote_data)
             if price is None:
@@ -958,25 +963,45 @@ class RealTimeSignalGenerator:
             print(f"⚠️ [{self.symbol}] 出场评分计算失败: {e}")
             return 0.0
     
+    def _get_market_hours_status(self) -> Tuple[bool, str]:
+        """判断美股市场时间状态 - 专注QQQ交易
+        
+        Returns:
+            tuple: (是否为交易时间, 时间描述)
+        """
+        import datetime
+        from datetime import timezone, timedelta
+        
+        # 美股市场时间判断 - 使用EDT夏令时 (UTC-4)
+        eastern = timezone(timedelta(hours=-4))  # EDT 夏令时
+        et_time = datetime.datetime.now(eastern)
+        weekday = et_time.weekday()  # 0=Monday, 6=Sunday
+        hour = et_time.hour
+        minute = et_time.minute
+        
+        if weekday >= 5:  # 周末
+            return False, f"美东时间: {et_time.strftime('%H:%M:%S')} (周末休市)"
+        
+        # 美股交易时间：09:30-16:00 EDT
+        if 9 <= hour < 16 and not (hour == 9 and minute < 30):
+            return True, f"美东时间: {et_time.strftime('%H:%M:%S')} (盘中)"
+        elif 4 <= hour < 20:  # 扩展时间包含盘前盘后
+            return False, f"美东时间: {et_time.strftime('%H:%M:%S')} (盘前/盘后)"
+        else:
+            return False, f"美东时间: {et_time.strftime('%H:%M:%S')} (非交易时间)"
+
     def _make_signal_decision(self, entry_score: float, exit_score: float, indicators: TechnicalIndicators) -> Tuple[str, float, float, List[str]]:
         """0DTE期权专用信号决策 - 动态阈值体系"""
         reasons = []
         
-        # 🕐 市场时段分析
+        # 🕐 市场时段分析 - 根据标的判断市场
         import datetime
         from datetime import timezone, timedelta
         
-        # 美东时间 (EST/EDT) - 夏令时使用-4，标准时间-5
-        # 当前是夏令时期间（3月-11月）
-        eastern = timezone(timedelta(hours=-4))  # EDT 夏令时
-        et_time = datetime.datetime.now(eastern)
-        current_hour = et_time.hour
-        
-        # 美股交易时间：9:30-16:00 EDT
-        is_market_hours = 9 <= current_hour <= 16
+        is_market_hours, time_description = self._get_market_hours_status()
         is_pre_post_market = not is_market_hours
         
-        print(f"🕒 美东时间: {et_time.strftime('%H:%M:%S')} ({'盘中' if is_market_hours else '盘前/盘后'})")
+        print(f"🕒 {time_description}")
         
         # 🎯 0DTE动态阈值设计
         if is_pre_post_market:
@@ -1302,8 +1327,14 @@ class RealAPIRiskManagerDemo:
         
         # 🚀 自动交易频率控制
         self.last_trade_time = None
-        self.active_positions = {}
-        self.max_concurrent_positions = 3
+        
+        # 📊 持仓管理系统 - 开仓-平仓配对模式
+        self.active_positions = {}  # {position_id: position_info}
+        self.total_position_value = 0.0
+        self.position_counter = 0  # 用于生成唯一的持仓ID
+        self.last_close_check_time = 0  # 上次平仓检查时间
+        self.is_position_open = False  # 是否有开仓（防止重复开仓）
+        self.fixed_quantity = 1  # 固定开仓手数（未来可根据风控动态调整）
         
     def _print_initialization_summary(self):
         """打印初始化摘要"""
@@ -1378,6 +1409,15 @@ class RealAPIRiskManagerDemo:
     def _on_quote_changed(self, quote_data):
         """处理基本行情推送"""
         try:
+            # 调试：打印接收到的数据
+            print(f"📡 [基础行情] 接收到推送数据: {type(quote_data)}")
+            if hasattr(quote_data, 'symbol'):
+                print(f"   标的: {quote_data.symbol}")
+            if hasattr(quote_data, 'latestPrice'):
+                print(f"   最新价: {quote_data.latestPrice}")
+            if hasattr(quote_data, 'volume'):
+                print(f"   成交量: {quote_data.volume}")
+                
             # 更新推送统计
             if hasattr(quote_data, 'latestPrice') and quote_data.latestPrice:
                 self._update_push_stats('price', float(quote_data.latestPrice))
@@ -1390,6 +1430,15 @@ class RealAPIRiskManagerDemo:
                     reasons_str = ", ".join(signal.reasons) if signal.reasons else "无详情"
                     print(f"🎯 [推送信号] {signal.signal_type}: {signal.strength:.3f} ({reasons_str})")
                     
+                    # 📊 定期检查平仓条件 (每30秒检查一次)
+                    import time
+                    current_time = time.time()
+                    if current_time - self.last_close_check_time >= 30:
+                        self.last_close_check_time = current_time
+                        if self.active_positions:  # 只有当有持仓时才检查
+                            print(f"\\n⏰ === 定期平仓检查 === (持仓数:{len(self.active_positions)})")
+                            self._check_auto_close_conditions()
+                    
                     # 🚀 自动交易：信号强度>70时触发交易（固定1手）
                     if signal.strength > 70 and signal.signal_type in ['BUY', 'SELL']:
                         self._execute_auto_trade(signal)
@@ -1397,8 +1446,21 @@ class RealAPIRiskManagerDemo:
             print(f"❌ 处理行情推送失败: {e}")
     
     def _on_quote_bbo_changed(self, bbo_data):
-        """处理最优报价推送"""
+        """处理最优报价推送 - 只处理QQQ数据"""
         try:
+            # 🎯 核心修复：只处理QQQ数据，过滤其他标的
+            if hasattr(bbo_data, 'symbol') and bbo_data.symbol != "QQQ":
+                return  # 静默忽略非QQQ数据
+                
+            # 调试：打印接收到的QQQ BBO数据
+            print(f"💰 [BBO推送] 接收到推送数据: {type(bbo_data)}")
+            if hasattr(bbo_data, 'symbol'):
+                print(f"   标的: {bbo_data.symbol}")
+            if hasattr(bbo_data, 'bidPrice'):
+                print(f"   买价: {bbo_data.bidPrice}")
+            if hasattr(bbo_data, 'askPrice'):
+                print(f"   卖价: {bbo_data.askPrice}")
+                
             # 更新BBO推送统计
             self._update_push_stats('bbo')
             
@@ -1454,14 +1516,53 @@ class RealAPIRiskManagerDemo:
                 print("❌ 推送连接超时")
                 return False
             
+            # 🚨 关键修复：先取消所有现有订阅，避免残留订阅
+            print("🧹 清理所有现有订阅...")
+            try:
+                # 尝试取消常见的残留订阅
+                from tigeropen.common.consts import QuoteKeyType
+                common_symbols = ['00700', 'QQQ', 'SPY', 'AAPL']
+                for old_symbol in common_symbols:
+                    try:
+                        self.push_client.unsubscribe_quote([old_symbol])
+                        self.push_client.unsubscribe_quote([old_symbol], quote_key_type=QuoteKeyType.QUOTE)
+                    except:
+                        pass  # 忽略取消失败的情况
+                print("   历史订阅清理完成")
+            except Exception as e:
+                print(f"   清理订阅时出错: {e}")
+            
+            # 等待清理完成
+            time.sleep(1)
+            
             # 订阅基础行情数据 (包含价格、成交量等完整信息)
             print(f"📡 订阅 {symbol} 基础行情数据 (包含成交量)...")
-            self.push_client.subscribe_quote([symbol])
+            result1 = self.push_client.subscribe_quote([symbol])
+            print(f"   基础行情订阅结果: {result1}")
             
             # 同时订阅最优报价数据 (获取精确买卖价)
-            from tigeropen.common.consts import QuoteKeyType
             print(f"💰 订阅 {symbol} 最优报价数据 (BBO)...")
-            self.push_client.subscribe_quote([symbol], quote_key_type=QuoteKeyType.QUOTE)
+            result2 = self.push_client.subscribe_quote([symbol], quote_key_type=QuoteKeyType.QUOTE)
+            print(f"   BBO订阅结果: {result2}")
+            
+            # 等待订阅确认
+            time.sleep(2)
+            print(f"🕒 等待2秒让订阅生效...")
+            
+            # 尝试其他订阅类型测试
+            print(f"🔍 尝试订阅详细行情...")
+            try:
+                result3 = self.push_client.subscribe_stock_detail([symbol])
+                print(f"   详细行情订阅结果: {result3}")
+            except Exception as e:
+                print(f"   详细行情订阅失败: {e}")
+                
+            # 添加调试回调测试
+            print(f"📊 调试：推送客户端状态检查...")
+            print(f"   连接状态: {self.is_push_connected}")
+            print(f"   客户端对象: {type(self.push_client)}")
+            print(f"   订阅标的: {symbol}")
+            print(f"   等待数据推送中...")
             
             # 创建推送模式的信号生成器
             self.push_signal_generator = RealTimeSignalGenerator(symbol, use_push_data=True)
@@ -1479,15 +1580,25 @@ class RealAPIRiskManagerDemo:
             import time
             current_time = time.time()
             
-            # ⏱️ 交易频率控制（盘中30秒间隔）
+            # ⏱️ 动态交易频率控制 
             if hasattr(self, 'last_trade_time') and self.last_trade_time:
                 time_since_last = current_time - self.last_trade_time
-                min_interval = 30.0  # 盘中最小交易间隔30秒
+                min_interval = self._calculate_dynamic_interval(signal)
                 
                 if time_since_last < min_interval:
                     remaining = min_interval - time_since_last
-                    print(f"⏱️ [交易频控] 距上次交易{time_since_last:.1f}秒，等待{remaining:.1f}秒后再交易")
+                    print(f"⏱️ [动态频控] 距上次交易{time_since_last:.1f}秒，等待{remaining:.1f}秒后再交易 (间隔:{min_interval}s)")
                     return
+            
+            # 🔒 预先锁定交易时间，防止并发交易
+            self.last_trade_time = current_time
+            
+            # 📊 开仓-平仓配对检查：避免重复开仓
+            if self.is_position_open:
+                print(f"⚠️ [配对交易] 当前有未平仓位，必须先平仓才能开新仓 (活跃持仓:{len(self.active_positions)})")
+                print("💡 系统将优先执行平仓检查...")
+                self._check_auto_close_conditions()
+                return
             
             # 🎯 信号确认
             print(f"\n🚀 [自动交易] 信号触发：{signal.signal_type} 强度{signal.strength:.1f}")
@@ -1544,39 +1655,449 @@ class RealAPIRiskManagerDemo:
             self._execute_paper_order(
                 option_info={**selected_option, 'price': market_price, 'ask': market_price},
                 action="BUY",
-                quantity=1,  # 固定1手
+                quantity=self.fixed_quantity,  # 固定开仓手数（可配置）
                 description=f"{signal.signal_type}自动交易-市价"
             )
             
-            # ✅ 更新交易时间
-            self.last_trade_time = current_time
+
+        
+            # 📊 记录开仓持仓
+            # 根据信号类型记录对应的持仓
+            if signal.signal_type == "BUY" and selected_option['put_call'].upper() == "CALL":
+                position_id = self._record_new_position(selected_option, "CALL", self.fixed_quantity, market_price)
+                if position_id:
+                    print(f"📝 记录CALL持仓: {position_id}")
+            elif signal.signal_type == "SELL" and selected_option['put_call'].upper() == "PUT":
+                position_id = self._record_new_position(selected_option, "PUT", self.fixed_quantity, market_price)
+                if position_id:
+                    print(f"📝 记录PUT持仓: {position_id}")
+            
+            # 显示当前持仓状态
+            self._print_position_summary()
+            
+            # 🔍 检查是否需要平仓 (开仓后)
+            self._check_auto_close_conditions()
+            
             print(f"✅ 自动交易完成，下次交易需等待30秒\n")
             
         except Exception as e:
             print(f"❌ 自动交易失败: {e}")
     
+    # ==================== 持仓管理系统 ====================
+    
+    def _record_new_position(self, option_info: dict, option_type: str, quantity: int, entry_price: float) -> Optional[str]:
+        """记录新开仓位"""
+        try:
+            # 生成唯一持仓ID
+            self.position_counter += 1
+            position_id = f"POS_{option_type}_{self.position_counter:03d}_{int(time.time() % 10000)}"
+            
+            # 创建持仓记录
+            position = {
+                'position_id': position_id,
+                'symbol': option_info['symbol'],
+                'option_type': option_type,
+                'strike': option_info['strike'],
+                'quantity': quantity,
+                'entry_price': entry_price,
+                'entry_time': datetime.now().strftime('%H:%M:%S'),
+                'current_price': entry_price,
+                'unrealized_pnl': 0.0,
+                'position_value': quantity * entry_price * 100,  # 期权乘数100
+                'stop_loss_price': entry_price * 0.5,  # 50%止损
+                'take_profit_price': entry_price * 3.0,  # 200%止盈
+                'expiry': option_info.get('expiry', ''),
+                'status': 'OPEN'
+            }
+            
+            # 记录到活跃持仓
+            self.active_positions[position_id] = position
+            
+            # 🔒 更新全局持仓状态
+            self.is_position_open = True
+            
+            # 更新总持仓价值
+            self.total_position_value += position['position_value']
+            
+            print(f"📊 新持仓记录:")
+            print(f"   持仓ID: {position_id}")
+            print(f"   期权: {position['symbol']} {option_type}")
+            print(f"   数量: {quantity} 手")
+            print(f"   开仓价: ${entry_price:.2f}")
+            print(f"   持仓价值: ${position['position_value']:,.2f}")
+            print(f"   止损价: ${position['stop_loss_price']:.2f}")
+            print(f"   止盈价: ${position['take_profit_price']:.2f}")
+            
+            return position_id
+            
+        except Exception as e:
+            print(f"❌ 记录持仓失败: {e}")
+            return None
+    
+    def _print_position_summary(self):
+        """显示持仓摘要 - 开仓平仓配对模式"""
+        print(f"\n📊 === 持仓摘要 (配对模式) ===")
+        print(f"持仓状态: {'🔒 有持仓' if self.is_position_open else '🔓 空仓'}")
+        print(f"活跃持仓数: {len(self.active_positions)}")
+        print(f"固定开仓手数: {self.fixed_quantity} 手")
+        print(f"总持仓价值: ${self.total_position_value:,.2f}")
+        
+        if self.active_positions:
+            for pos_id, pos in self.active_positions.items():
+                # 计算持仓时长
+                try:
+                    entry_time_str = pos.get('entry_time', '')
+                    if entry_time_str:
+                        entry_time = datetime.strptime(entry_time_str, '%H:%M:%S').time()
+                        current_time = datetime.now()
+                        entry_dt = current_time.replace(hour=entry_time.hour, minute=entry_time.minute, second=entry_time.second)
+                        age_seconds = (current_time - entry_dt).total_seconds()
+                        age_minutes = int(age_seconds // 60)
+                        age_seconds = int(age_seconds % 60)
+                        time_display = f"持仓{age_minutes}分{age_seconds}秒"
+                    else:
+                        time_display = "持仓时间未知"
+                except:
+                    time_display = "持仓时间计算错误"
+                
+                pnl_percent = pos.get('pnl_percent', 0)
+                print(f"  {pos['option_type']} {pos['symbol']}: ${pos['current_price']:.2f} "
+                      f"({time_display}, 盈亏{pnl_percent:+.1f}%)")
+        else:
+            print("  ✅ 无持仓，准备接受新的交易信号")
+        print("=" * 40)
+    
+    def _get_position_count(self) -> int:
+        """获取当前持仓数量"""
+        return len(self.active_positions)
+    
+    def _check_position_limits(self) -> bool:
+        """检查持仓限制"""
+        current_count = self._get_position_count()
+        if current_count >= self.max_concurrent_positions:
+            print(f"⚠️ 已达到最大持仓数限制: {current_count}/{self.max_concurrent_positions}")
+            return False
+        return True
+    
+    def _calculate_dynamic_interval(self, signal) -> float:
+        """计算动态交易间隔
+        
+        根据信号强度和当前持仓情况智能调整交易频率：
+        - 信号强度越高，间隔越短
+        - 持仓数量越多，间隔越长
+        - 0DTE期权优化：偏向更短间隔
+        """
+        try:
+            signal_strength = signal.strength
+            current_positions = len(self.active_positions)
+            
+            # 🎯 基于信号强度的基础间隔
+            if signal_strength >= 90:
+                base_interval = 10.0    # 强信号：10秒
+                strength_desc = "强信号"
+            elif signal_strength >= 80:
+                base_interval = 15.0    # 较强信号：15秒  
+                strength_desc = "较强信号"
+            elif signal_strength >= 70:
+                base_interval = 20.0    # 中等信号：20秒
+                strength_desc = "中等信号"
+            else:
+                base_interval = 25.0    # 弱信号：25秒
+                strength_desc = "弱信号"
+            
+            # 📊 基于持仓数量的调整系数
+            if current_positions == 0:
+                position_multiplier = 0.7   # 首次开仓：减少30%
+                position_desc = "首次开仓"
+            elif current_positions == 1:
+                position_multiplier = 1.0   # 第二个持仓：正常
+                position_desc = "增加持仓"
+            elif current_positions == 2:
+                position_multiplier = 1.3   # 第三个持仓：增加30%
+                position_desc = "谨慎加仓"
+            else:
+                position_multiplier = 1.8   # 多持仓：增加80%
+                position_desc = "严格控制"
+            
+            # 🕐 时间因子：临近收盘更谨慎（可选）
+            from datetime import datetime, timezone, timedelta
+            eastern = timezone(timedelta(hours=-4))  # EDT
+            et_time = datetime.now(eastern)
+            current_hour = et_time.hour
+            
+            if current_hour >= 15:  # 下午3点后更谨慎
+                time_multiplier = 1.2
+                time_desc = "临近收盘"
+            else:
+                time_multiplier = 1.0
+                time_desc = "正常时段"
+            
+            # 📈 最终间隔计算
+            final_interval = base_interval * position_multiplier * time_multiplier
+            
+            # 📏 边界限制：最小5秒，最大60秒
+            final_interval = max(5.0, min(final_interval, 60.0))
+            
+            print(f"🔄 [动态频控计算] {strength_desc}({signal_strength:.1f}) × {position_desc}({current_positions}仓) × {time_desc} = {final_interval:.1f}秒")
+            
+            return final_interval
+            
+        except Exception as e:
+            print(f"⚠️ 动态频控计算失败，使用默认20秒: {e}")
+            return 20.0
+    
+    # ==================== 自动平仓系统 ====================
+    
+    def _check_auto_close_conditions(self):
+        """检查所有持仓的平仓条件"""
+        if not self.active_positions:
+            return
+            
+        print(f"\n🔍 === 自动平仓检查 ===")
+        
+        close_list = []  # 需要平仓的持仓列表
+        
+        for position_id, position in self.active_positions.items():
+            try:
+                # 获取当前期权价格
+                current_price = self._get_real_time_option_price(position['symbol'])
+                if not current_price:
+                    print(f"⚠️ {position['symbol']} 无法获取实时价格，跳过平仓检查")
+                    continue
+                
+                # 更新持仓当前价值和盈亏
+                position['current_price'] = current_price
+                position['current_value'] = current_price * position['quantity'] * 100
+                position['unrealized_pnl'] = (current_price - position['entry_price']) * position['quantity'] * 100
+                position['pnl_percent'] = ((current_price - position['entry_price']) / position['entry_price']) * 100
+                
+                # 检查各种平仓条件
+                close_reason = self._should_close_position(position)
+                
+                if close_reason:
+                    close_list.append((position_id, position, close_reason))
+                    print(f"📤 {position['symbol']} 触发平仓: {close_reason}")
+                else:
+                    print(f"✅ {position['symbol']} 继续持有: 盈亏{position['pnl_percent']:+.1f}% (${position['unrealized_pnl']:+.0f})")
+                    
+            except Exception as e:
+                print(f"❌ 检查 {position_id} 平仓条件失败: {e}")
+        
+        # 执行平仓操作
+        for position_id, position, reason in close_list:
+            self._execute_auto_close(position_id, position, reason)
+    
+    def _should_close_position(self, position) -> Optional[str]:
+        """判断是否应该平仓，返回平仓原因
+        
+        针对0DTE期权优化的风险控制策略：
+        - 快速止损：避免巨大损失  
+        - 灵活止盈：及时锁定收益
+        - 时间管理：考虑时间价值衰减
+        """
+        current_price = position['current_price']
+        entry_price = position['entry_price']
+        pnl_percent = position['pnl_percent']
+        
+        # 计算持仓时长
+        from datetime import datetime, timezone, timedelta
+        eastern = timezone(timedelta(hours=-4))  # EDT
+        et_time = datetime.now(eastern)
+        
+        entry_time_str = position.get('entry_time', '')
+        if entry_time_str:
+            try:
+                entry_time = datetime.strptime(entry_time_str, '%H:%M:%S').time()
+                entry_dt = et_time.replace(hour=entry_time.hour, minute=entry_time.minute, second=entry_time.second)
+                hold_duration = (et_time - entry_dt).total_seconds()
+            except:
+                hold_duration = 0
+        else:
+            hold_duration = 0
+        
+        # 1️⃣ 快速止损检查 (0DTE期权：15%止损)
+        stop_loss_threshold = -15.0  # 更严格的止损
+        if pnl_percent <= stop_loss_threshold:
+            return f"止损平仓 (亏损{pnl_percent:.1f}%)"
+        
+        # 2️⃣ 动态止盈检查 (根据持仓时间调整)
+        if hold_duration < 120:  # 2分钟内：快速获利了结
+            take_profit_threshold = 25.0  # 25%止盈
+        elif hold_duration < 300:  # 5分钟内：中等获利目标
+            take_profit_threshold = 50.0  # 50%止盈
+        else:  # 5分钟后：更高获利要求
+            take_profit_threshold = 80.0  # 80%止盈
+            
+        if pnl_percent >= take_profit_threshold:
+            return f"止盈平仓 (盈利{pnl_percent:.1f}%, 持仓{hold_duration:.0f}秒)"
+        
+        # 3️⃣ 时间管理检查
+        current_hour = et_time.hour
+        current_minute = et_time.minute
+        
+        # 3.1 强制平仓：15:45后
+        if current_hour >= 15 and current_minute >= 45:
+            return f"临近收盘强制平仓 (15:45后)"
+        
+        # 3.2 时间衰减平仓：持仓超过8分钟
+        if hold_duration > 480:  # 8分钟
+            return f"时间衰减平仓 (持仓{hold_duration:.0f}秒超时)"
+        
+        # 3.3 快速盈利保护：盈利后持仓过久开始衰减
+        if pnl_percent > 15 and hold_duration > 300:  # 盈利15%后持仓5分钟
+            return f"盈利保护平仓 (盈利{pnl_percent:.1f}%, 避免时间衰减)"
+        
+        # 4️⃣ 技术信号平仓检查 (反向强信号)
+        # 这里可以根据当前信号强度决定是否平仓
+        # 比如：持有CALL时出现强SELL信号
+        
+        return None  # 不需要平仓
+    
+    def print_risk_control_summary(self):
+        """显示优化后的风险控制参数摘要"""
+        print(f"\n🛡️ === 0DTE期权风险控制策略 ===")
+        print(f"📉 止损策略: -15% (快速止损，避免巨大损失)")
+        print(f"📈 动态止盈:")
+        print(f"   • 2分钟内: +25% (快速获利了结)")
+        print(f"   • 5分钟内: +50% (中等获利目标)")  
+        print(f"   • 5分钟后: +80% (更高获利要求)")
+        print(f"⏰ 时间管理:")
+        print(f"   • 最大持仓: 8分钟 (避免时间衰减)")
+        print(f"   • 盈利保护: 盈利15%后持仓5分钟自动平仓")
+        print(f"   • 强制平仓: 15:45 EDT后")
+        print(f"🎯 适用场景: 0DTE期权30秒-8分钟短期交易")
+        print("=" * 50)
+    
+    def _execute_auto_close(self, position_id: str, position: dict, reason: str):
+        """执行自动平仓"""
+        try:
+            print(f"\n🚀 === 执行自动平仓 ===")
+            print(f"持仓ID: {position_id}")
+            print(f"期权: {position['symbol']}")
+            print(f"平仓原因: {reason}")
+            print(f"开仓价: ${position['entry_price']:.2f}")
+            print(f"当前价: ${position['current_price']:.2f}")
+            print(f"盈亏: {position['pnl_percent']:+.1f}% (${position['unrealized_pnl']:+.0f})")
+            
+            # 构造平仓订单信息
+            close_option_info = {
+                'symbol': position['symbol'],
+                'option_type': position['option_type'],
+                'put_call': position['option_type'],  # ✅ 添加缺失的字段
+                'strike': position['strike'],
+                'expiry': position.get('expiry', '2025-08-26'),  # ✅ 添加缺失的字段
+                'price': position['current_price'],
+                'ask': position['current_price'],  # 使用当前价格作为卖出价
+                'bid': position['current_price'] * 0.99,  # 略低的买入价
+                'latest_price': position['current_price'],
+                'volume': position.get('volume', 0),
+                'score': 95.0  # 平仓不需要评分
+            }
+            
+            # 执行卖出操作 (平仓)
+            result = self._execute_paper_order(close_option_info, "SELL", position['quantity'], f"自动平仓-{reason}")
+            
+            if result and result.get('success'):
+                # 更新持仓状态为已平仓
+                position['status'] = 'CLOSED'
+                position['close_time'] = datetime.now().strftime('%H:%M:%S')
+                position['close_price'] = position['current_price']
+                position['close_reason'] = reason
+                position['realized_pnl'] = position['unrealized_pnl']
+                
+                # 从活跃持仓中移除
+                self.active_positions.pop(position_id)
+                
+                # 🔓 更新全局持仓状态：平仓后允许下次开仓
+                if len(self.active_positions) == 0:
+                    self.is_position_open = False
+                    print("🔓 全部持仓已平仓，允许下次开仓")
+                
+                print(f"✅ 平仓成功!")
+                print(f"   订单号: {result.get('order_id', 'N/A')}")
+                print(f"   实现盈亏: ${position['realized_pnl']:+.0f}")
+                
+                # 更新总持仓价值
+                self.total_position_value = sum(pos['current_value'] for pos in self.active_positions.values())
+                
+            else:
+                print(f"❌ 平仓失败: {result.get('error', '未知错误')}")
+                
+        except Exception as e:
+            print(f"❌ 执行平仓失败: {e}")
+    
     def _get_real_time_option_price(self, option_symbol: str) -> Optional[float]:
         """获取期权实时价格（Ask价格）"""
         try:
-            # 获取期权实时报价
+            # 方法1: 直接获取期权报价
             option_quotes = self.quote_client.get_stock_briefs([option_symbol])
             if option_quotes is not None and not option_quotes.empty:
                 quote = option_quotes.iloc[0]
                 
                 # 优先使用Ask价格进行买入
-                ask_price = getattr(quote, 'ask', 0) or getattr(quote, 'ask_price', 0)
+                ask_price = getattr(quote, 'ask_price', 0)
                 if ask_price and ask_price > 0:
                     return float(ask_price)
                 
                 # 备选：使用最新价格
-                latest_price = getattr(quote, 'latest_price', 0) or getattr(quote, 'price', 0)
+                latest_price = getattr(quote, 'latest_price', 0) 
                 if latest_price and latest_price > 0:
                     return float(latest_price)
             
-            return None
+            # 方法2: 通过期权链查询（如果直接查询失败）
+            return self._get_option_price_from_chain(option_symbol)
             
         except Exception as e:
             print(f"⚠️ 获取期权实时价格失败 {option_symbol}: {e}")
+            return self._get_option_price_from_chain(option_symbol)
+    
+    def _get_option_price_from_chain(self, option_symbol: str) -> Optional[float]:
+        """通过期权链获取期权价格（备用方法）"""
+        try:
+            # 解析期权代码: QQQ_20250826_PUT_571
+            parts = option_symbol.split('_')
+            if len(parts) != 4:
+                return None
+                
+            underlying, date_str, right, strike_str = parts
+            strike = float(strike_str)
+            
+            # 转换日期格式: 20250826 -> 2025-08-26
+            expiry_date = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
+            
+            # 获取期权链
+            option_chain = self.quote_client.get_option_chain(underlying, expiry_date)
+            if option_chain is not None and not option_chain.empty:
+                # 查找匹配的期权（注意：字段是put_call，strike是字符串类型）
+                matching_option = option_chain[
+                    (option_chain['put_call'] == right) & 
+                    (option_chain['strike'] == str(strike))
+                ]
+                
+                if not matching_option.empty:
+                    option_data = matching_option.iloc[0]
+                    # 使用ask_price字段
+                    ask_price = option_data.get('ask_price', 0)
+                    if ask_price and ask_price > 0:
+                        print(f"📊 [期权链] {option_symbol} Ask价格: ${ask_price:.2f}")
+                        return float(ask_price)
+                    
+                    # 备选：latest_price
+                    latest_price = option_data.get('latest_price', 0)
+                    if latest_price and latest_price > 0:
+                        print(f"📊 [期权链] {option_symbol} Latest价格: ${latest_price:.2f}")
+                        return float(latest_price)
+                        
+                    # 最后备选：bid_price（卖出时参考）
+                    bid_price = option_data.get('bid_price', 0)
+                    if bid_price and bid_price > 0:
+                        print(f"📊 [期权链] {option_symbol} Bid价格: ${bid_price:.2f}")
+                        return float(bid_price)
+                        
+            return None
+            
+        except Exception as e:
+            print(f"⚠️ 期权链价格获取失败 {option_symbol}: {e}")
             return None
     
     def _execute_option_trade(self, signal: TradingSignal):
@@ -1722,7 +2243,7 @@ class RealAPIRiskManagerDemo:
         try:
             if not option_chain:
                 return None
-                
+            
             # 根据信号类型确定期权类型
             option_type = "CALL" if signal.signal_type == "BUY" else "PUT"
             
@@ -1922,7 +2443,7 @@ class RealAPIRiskManagerDemo:
                     print(f"✅ 真实订单提交成功! 订单ID: {order_result['order_id']}")
                 else:
                     print("❌ 订单提交失败")
-                    return None
+                return None
             
             return order_result
             
@@ -2006,7 +2527,7 @@ class RealAPIRiskManagerDemo:
                 print(f"   下单时间: {datetime.now().strftime('%H:%M:%S')}")
             else:
                 print(f"❌ {description}下单失败: {order_result.get('error', '未知错误')}")
-                
+            
         except Exception as e:
             print(f"❌ {description}下单异常: {e}")
             import traceback
@@ -2375,6 +2896,12 @@ class RealAPIRiskManagerDemo:
                 print()
                 
                 self._execute_paper_order(call_option_info, "BUY", 1, "看涨期权")
+                
+                # 📊 记录测试持仓
+                if call_option_info.get('ask', 0) > 0:
+                    position_id = self._record_new_position(call_option_info, "CALL", 1, call_option_info['ask'])
+                    if position_id:
+                        print(f"📝 记录CALL测试持仓: {position_id}")
             else:
                 print("❌ 未找到合适的看涨期权")
             
@@ -2394,15 +2921,52 @@ class RealAPIRiskManagerDemo:
                 print()
                 
                 self._execute_paper_order(put_option_info, "BUY", 1, "看跌期权")
+                
+                # 📊 记录测试持仓
+                if put_option_info.get('ask', 0) > 0:
+                    position_id = self._record_new_position(put_option_info, "PUT", 1, put_option_info['ask'])
+                    if position_id:
+                        print(f"📝 记录PUT测试持仓: {position_id}")
             else:
                 print("❌ 未找到合适的看跌期权")
-                
+            
+            # 显示最终持仓摘要
+            print("\n")
+            self._print_position_summary()
+            
+            # 🔍 检查是否需要平仓
+            self._check_auto_close_conditions()
+            
             print("\n🎉 期权交易测试完成!")
             
         except Exception as e:
             print(f"❌ 期权交易测试失败: {e}")
             import traceback
             traceback.print_exc()
+
+    def _display_market_time_info(self, symbol: str):
+        """显示美股市场时间信息 - 专注QQQ交易"""
+        from datetime import datetime, timezone, timedelta
+        
+        # 美股市场 - 美东时间 (EST/EDT)
+        eastern = timezone(timedelta(hours=-5))  # EST标准时间
+        et_time = datetime.now(eastern)
+        print(f"⏰ 当前美东时间: {et_time.strftime('%Y-%m-%d %H:%M:%S EST')}")
+        
+        weekday = et_time.weekday()  # 0=Monday, 6=Sunday
+        hour = et_time.hour
+        
+        if weekday < 5:  # 工作日
+            if 9 <= hour < 16:  # 9AM-4PM EST (正常交易)
+                print(f"✅ 美股正常交易时段")
+            elif 4 <= hour < 9:  # 4AM-9AM EST (盘前)
+                print(f"🟡 美股盘前交易时段")
+            elif 16 <= hour < 20:  # 4PM-8PM EST (盘后)
+                print(f"🟡 美股盘后交易时段")
+            else:
+                print(f"⚠️ 美股非交易时间")
+        else:
+            print(f"⚠️ 周末，美股休市")
 
     def start_push_data_trading(self, symbol: str) -> bool:
         """启动基于推送数据的实时交易信号生成"""
@@ -2424,6 +2988,11 @@ class RealAPIRiskManagerDemo:
             print(f"✅ 推送数据交易模式启动成功")
             print(f"📡 正在接收 {symbol} 实时推送数据...")
             print(f"🎯 信号生成器已就绪，等待推送数据...")
+            
+            # 根据标的自动识别市场和时区
+            self._display_market_time_info(symbol)
+            
+            print(f"📊 预期：如果有数据推送，将显示调试信息...")
             print()
             
             return True
@@ -2970,14 +3539,14 @@ class RealAPIRiskManagerDemo:
                     
                     # 检查风险 - 使用风险管理器的组合风险检查
                     alerts = self.risk_manager.check_portfolio_risks()
-                    
+                        
                     if alerts:
                         print(f"🚨 {position.symbol} 基于真实价格触发 {len(alerts)} 个风险警报")
                         for alert in alerts:
                             print(f"  ⚠️ {alert.severity.upper()}: {alert.message}")
                     else:
                         print(f"✅ {position.symbol} 价格变动在安全范围内")
-                    
+                        
                     update_count += 1
                     print()
                 
@@ -3231,6 +3800,9 @@ def main():
         
         demo = RealAPIRiskManagerDemo()
         
+        # 显示优化后的风险控制策略
+        demo.print_risk_control_summary()
+        
         # 检查命令行参数
         if len(sys.argv) > 1:
             arg = sys.argv[1]
@@ -3257,8 +3829,11 @@ def main():
                 print("="*60)
                 demo.test_option_trading_execution("QQQ")
             elif arg == "signals" or arg == "push_signals":
-                # 纯推送模式信号生成 (长时间运行)
-                if demo.start_push_data_trading("QQQ"):
+                # 纯推送模式信号生成 - 专注QQQ 0DTE期权交易
+                symbol = "QQQ"  # 强制使用QQQ，确保专注美股0DTE期权
+                print(f"🎯 使用交易标的: {symbol} (专注0DTE期权)")
+
+                if demo.start_push_data_trading(symbol):
                     print("📡 推送模式信号生成已启动，按 Ctrl+C 停止...")
                     try:
                         while True:
