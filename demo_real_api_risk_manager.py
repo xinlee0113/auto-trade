@@ -1256,6 +1256,17 @@ class RealAPIRiskManagerDemo:
         self.risk_manager = create_risk_manager(self.config)
         self.greeks_calculator = GreeksCalculator()
         
+        # 🔥 集成专业期权分析器 - 替换简化评分逻辑
+        from src.services.option_analyzer import OptionAnalyzer
+        from src.config.option_config import OptionConfig, OptionStrategy
+        
+        # 配置期权分析器 - 针对0DTE期权优化
+        option_config = OptionConfig()
+        self.option_analyzer = OptionAnalyzer(option_config)
+        self.default_option_strategy = OptionStrategy.VALUE  # 0DTE适合价值策略（追求高Gamma/低时间衰减）
+        
+        print("✅ 集成专业期权分析器: OptionAnalyzer")
+        
         # 注册风险回调
         self.risk_manager.register_risk_alert_callback(self.on_risk_alert)
         self.risk_manager.register_emergency_stop_callback(self.on_emergency_stop)
@@ -2048,138 +2059,96 @@ class RealAPIRiskManagerDemo:
         return None  # 不需要平仓
     
     def _get_position_greeks(self, position) -> dict:
-        """获取持仓的实时Greeks数据"""
+        """获取持仓的实时Greeks数据 - 唯一可信的API数据源"""
+        symbol = position.get('symbol', '')
+        
         try:
-            # 尝试从API获取实时Greeks
-            symbol = position.get('symbol', '')
-            if symbol:
-                api_greeks = self._fetch_real_greeks_from_api(symbol)
-                if api_greeks:
-                    print(f"✅ 获取到API Greeks: {symbol} Delta={api_greeks.get('delta', 0):.3f}")
-                    return api_greeks
+            # 唯一方案: 从Tiger API获取真实Greeks数据
+            if not symbol:
+                raise ValueError("期权代码不能为空")
             
-            # 尝试从持仓信息中获取存储的Greeks
-            greeks = {}
-            if 'delta' in position:
-                greeks['delta'] = position.get('delta', 0.5)
-            if 'gamma' in position:
-                greeks['gamma'] = position.get('gamma', 0.03)
-            if 'theta' in position:
-                greeks['theta'] = position.get('theta', -0.05)
-            if 'vega' in position:
-                greeks['vega'] = position.get('vega', 0.1)
+            api_greeks = self._fetch_real_greeks_from_api(symbol)
+            if not api_greeks:
+                raise RuntimeError(f"无法从API获取Greeks数据: {symbol}")
             
-            if greeks:
-                print(f"✅ 使用存储Greeks: {symbol}")
-                return greeks
-            
-            # 最后使用基于标的价格和执行价的实时计算
-            calculated_greeks = self._calculate_real_time_greeks(position)
-            print(f"📊 计算实时Greeks: {symbol} Delta={calculated_greeks.get('delta', 0):.3f}")
-            return calculated_greeks
+            print(f"✅ API获取Greeks: {symbol} Delta={api_greeks.get('delta', 0):.3f}")
+            return api_greeks
             
         except Exception as e:
-            print(f"⚠️ 获取Greeks失败: {e}")
-            return self._get_fallback_greeks(position.get('option_type', 'CALL'))
+            error_msg = f"❌ Greeks数据获取失败 {symbol}: {e}"
+            print(error_msg)
+            raise RuntimeError(error_msg) from e
     
     def _fetch_real_greeks_from_api(self, option_symbol: str) -> Optional[dict]:
-        """从Tiger API获取实时Greeks数据"""
+        """从Tiger API获取实时Greeks数据 - 唯一可信数据源"""
         try:
-            # 使用Tiger API获取期权详细数据
-            from tigeropen.quote.quote_client import QuoteClient
+            print(f"🔄 正在从Tiger API获取Greeks: {option_symbol}")
             
-            # 获取期权详细信息（包含Greeks）
+            # 使用Tiger API获取期权详细信息（包含实时Greeks）
             option_briefs = self.quote_client.get_option_briefs([option_symbol])
             
-            if option_briefs and len(option_briefs) > 0:
-                option_data = option_briefs[0]
-                
-                # 提取Greeks数据
-                greeks = {}
-                if hasattr(option_data, 'delta') and option_data.delta is not None:
-                    greeks['delta'] = float(option_data.delta)
-                if hasattr(option_data, 'gamma') and option_data.gamma is not None:
-                    greeks['gamma'] = float(option_data.gamma)
-                if hasattr(option_data, 'theta') and option_data.theta is not None:
-                    greeks['theta'] = float(option_data.theta)
-                if hasattr(option_data, 'vega') and option_data.vega is not None:
-                    greeks['vega'] = float(option_data.vega)
-                if hasattr(option_data, 'rho') and option_data.rho is not None:
-                    greeks['rho'] = float(option_data.rho)
-                
-                if greeks:
-                    return greeks
+            if not option_briefs or len(option_briefs) == 0:
+                raise RuntimeError(f"Tiger API未返回期权数据: {option_symbol}")
             
-            return None
+            option_data = option_briefs[0]
+            
+            # 验证并提取所有必需的Greeks数据
+            required_greeks = ['delta', 'gamma', 'theta', 'vega']
+            greeks = {}
+            
+            for greek_name in required_greeks:
+                if hasattr(option_data, greek_name):
+                    greek_value = getattr(option_data, greek_name)
+                    if greek_value is not None:
+                        greeks[greek_name] = float(greek_value)
+                    else:
+                        raise ValueError(f"Tiger API返回的{greek_name}为空")
+                else:
+                    raise ValueError(f"Tiger API响应中缺少{greek_name}字段")
+            
+            # 可选的Rho数据
+            if hasattr(option_data, 'rho') and option_data.rho is not None:
+                greeks['rho'] = float(option_data.rho)
+            
+            # 验证Greeks数据的合理性
+            self._validate_greeks_data(greeks, option_symbol)
+            
+            print(f"✅ 成功获取Greeks: {option_symbol} - Delta:{greeks['delta']:.3f}, Gamma:{greeks['gamma']:.3f}, Theta:{greeks['theta']:.3f}")
+            return greeks
             
         except Exception as e:
-            print(f"⚠️ API获取Greeks失败 {option_symbol}: {e}")
-            return None
+            error_msg = f"Tiger API获取Greeks失败 {option_symbol}: {e}"
+            print(f"❌ {error_msg}")
+            raise RuntimeError(error_msg) from e
     
-    def _calculate_real_time_greeks(self, position) -> dict:
-        """使用GreeksCalculator实时计算Greeks"""
+    def _validate_greeks_data(self, greeks: dict, option_symbol: str) -> None:
+        """验证Greeks数据的合理性"""
         try:
-            from src.models.trading_models import OptionTickData, UnderlyingTickData
-            from datetime import datetime
+            # Delta合理性检查: -1 <= Delta <= 1
+            delta = greeks.get('delta', 0)
+            if not (-1.0 <= delta <= 1.0):
+                raise ValueError(f"Delta值不合理: {delta} (应在-1到1之间)")
             
-            # 获取标的当前价格
-            underlying_symbol = position.get('underlying_symbol', 'QQQ')
-            underlying_price = self._get_current_underlying_price(underlying_symbol)
+            # Gamma合理性检查: Gamma >= 0
+            gamma = greeks.get('gamma', 0)
+            if gamma < 0:
+                raise ValueError(f"Gamma值不合理: {gamma} (应大于等于0)")
             
-            if not underlying_price:
-                return self._get_fallback_greeks(position.get('option_type', 'CALL'))
+            # Theta合理性检查: 通常为负值(期权时间价值衰减)
+            theta = greeks.get('theta', 0)
+            # 对于0DTE期权，Theta通常在-0.5到0之间
+            if not (-0.5 <= theta <= 0.05):
+                print(f"⚠️ Theta值异常: {theta} (0DTE期权通常在-0.5到0之间)")
             
-            # 构造期权数据
-            option_data = OptionTickData(
-                symbol=position.get('symbol', ''),
-                price=position.get('current_price', position.get('entry_price', 1.0)),
-                bid=position.get('bid', 0),
-                ask=position.get('ask', 0),
-                volume=position.get('volume', 0),
-                timestamp=datetime.now(),
-                strike=position.get('strike', underlying_price),
-                expiry=position.get('expiry', datetime.now().strftime('%Y-%m-%d')),
-                right=position.get('option_type', 'CALL'),
-                open_interest=position.get('open_interest', 0),
-                underlying=underlying_symbol
-            )
+            # Vega合理性检查: Vega >= 0
+            vega = greeks.get('vega', 0)
+            if vega < 0:
+                raise ValueError(f"Vega值不合理: {vega} (应大于等于0)")
             
-            # 构造标的数据
-            underlying_data = UnderlyingTickData(
-                symbol=underlying_symbol,
-                price=underlying_price,
-                volume=0,
-                timestamp=datetime.now(),
-                bid=underlying_price * 0.999,  # 模拟bid
-                ask=underlying_price * 1.001   # 模拟ask
-            )
-            
-            # 使用GreeksCalculator计算
-            greeks_result = self.greeks_calculator.calculate_greeks(
-                option_data, 
-                underlying_data
-            )
-            
-            return {
-                'delta': greeks_result.delta,
-                'gamma': greeks_result.gamma,
-                'theta': greeks_result.theta,
-                'vega': greeks_result.vega,
-                'rho': greeks_result.rho
-            }
+            print(f"✅ Greeks数据验证通过: {option_symbol}")
             
         except Exception as e:
-            print(f"⚠️ 实时计算Greeks失败: {e}")
-            return self._get_fallback_greeks(position.get('option_type', 'CALL'))
-    
-
-    
-    def _get_fallback_greeks(self, option_type: str) -> dict:
-        """获取备用Greeks数据"""
-        if option_type == 'CALL':
-            return {'delta': 0.5, 'gamma': 0.03, 'theta': -0.05, 'vega': 0.1, 'rho': 0.02}
-        else:  # PUT
-            return {'delta': -0.5, 'gamma': 0.03, 'theta': -0.05, 'vega': 0.1, 'rho': -0.02}
+            raise ValueError(f"Greeks数据验证失败 {option_symbol}: {e}")
     
     def _calculate_dynamic_take_profit(self, hold_duration: float, position_greeks: dict, vix_regime: str) -> float:
         """计算动态止盈阈值
@@ -2707,170 +2676,73 @@ class RealAPIRiskManagerDemo:
                 print(f"❌ 未找到 {option_type} 期权")
                 return None
             
-            # 评分并选择最优期权 (综合考虑流动性、价差、希腊字母)
-            best_option = None
-            best_score = -1
+            # 🔥 使用专业期权分析器进行评分和选择
+            print(f"🔍 使用专业期权分析器分析 {option_type} 期权 (共{len(candidate_options)}个候选)")
             
-            print(f"🎯 筛选最优 {option_type} 期权:")
-            for opt in candidate_options[:10]:  # 只评估前10个
-                score = self._calculate_option_score(opt, underlying_price, signal.strength)
-                print(f"   ${opt.strike:.0f} {opt.right} - 评分:{score:.1f}, 价格:${opt.latest_price:.2f}, 成交量:{opt.volume}")
-                
-                if score > best_score:
-                    best_score = score
-                    best_option = opt
+            # 将期权列表转换为DataFrame格式
+            option_data = []
+            for opt in candidate_options:
+                option_data.append({
+                    'symbol': opt.symbol,
+                    'strike': opt.strike,
+                    'right': opt.right,
+                    'expiry': getattr(opt, 'expiry', '2024-01-01'),
+                    'latest_price': opt.latest_price,
+                    'bid': opt.bid,
+                    'ask': opt.ask,
+                    'volume': opt.volume,
+                    'open_interest': opt.open_interest,
+                    'delta': getattr(opt, 'delta', 0),
+                    'gamma': getattr(opt, 'gamma', 0),
+                    'theta': getattr(opt, 'theta', 0),
+                    'vega': getattr(opt, 'vega', 0),
+                    'implied_vol': getattr(opt, 'implied_vol', 0.2)
+                })
             
-            if best_option:
-                print(f"✅ 选中期权: ${best_option.strike:.0f} {best_option.right}")
-                print(f"   期权价格: ${best_option.latest_price:.2f}")
-                print(f"   买卖价差: ${best_option.bid:.2f} - ${best_option.ask:.2f}")
-                print(f"   成交量: {best_option.volume:,}")
-                print(f"   最终评分: {best_score:.1f}")
+            import pandas as pd
+            option_df = pd.DataFrame(option_data)
+            
+            # 使用专业期权分析器
+            analysis_result = self.option_analyzer.analyze_options(
+                option_chains=option_df,
+                current_price=underlying_price,
+                strategy=self.default_option_strategy,
+                top_n=3  # 获取前3个候选期权
+            )
+            
+            # 获取分析结果
+            best_options = analysis_result.calls if option_type == "CALL" else analysis_result.puts
+            
+            if best_options and len(best_options) > 0:
+                best_analyzed = best_options[0]  # 评分最高的期权
                 
-            return best_option
+                # 从原始列表中找到对应的期权对象
+                best_option = None
+                for opt in candidate_options:
+                    if opt.symbol == best_analyzed.symbol:
+                        best_option = opt
+                        break
+                
+                if best_option:
+                    print(f"✅ 专业分析器选中: ${best_option.strike:.0f} {best_option.right}")
+                    print(f"   专业评分: {best_analyzed.score:.1f}, 排名: #{best_analyzed.rank}")
+                    print(f"   期权价格: ${best_option.latest_price:.2f}")
+                    print(f"   买卖价差: ${best_option.bid:.2f} - ${best_option.ask:.2f}")
+                    print(f"   成交量: {best_option.volume:,}")
+                    print(f"   Delta: {best_analyzed.delta:.3f}, Gamma: {best_analyzed.gamma:.3f}")
+                    
+                return best_option
+            else:
+                print("⚠️ 专业分析器未找到合适的期权")
+                return None
             
         except Exception as e:
             print(f"⚠️ 选择期权失败: {e}")
             return None
     
-    def _calculate_option_score(self, option, underlying_price: float, signal_strength: float) -> float:
-        """计算期权评分"""
-        try:
-            score = 0.0
-            
-            # 1. 流动性评分 (40%)
-            if option.volume > 100:
-                score += 20
-            elif option.volume > 50:
-                score += 15
-            elif option.volume > 10:
-                score += 10
-            
-            if option.open_interest > 500:
-                score += 15
-            elif option.open_interest > 100:
-                score += 10
-            elif option.open_interest > 50:
-                score += 5
-            
-            # 2. 价差评分 (30%)
-            if option.ask > 0 and option.bid > 0:
-                spread_pct = (option.ask - option.bid) / option.latest_price
-                if spread_pct < 0.05:  # 5%以内
-                    score += 15
-                elif spread_pct < 0.10:  # 10%以内
-                    score += 10
-                elif spread_pct < 0.20:  # 20%以内
-                    score += 5
-            
-            # 3. 价值评分 (30%)
-            # ATM距离 (越接近ATM越好)
-            atm_distance = abs(option.strike - underlying_price) / underlying_price
-            if atm_distance < 0.02:  # 2%以内
-                score += 15
-            elif atm_distance < 0.05:  # 5%以内
-                score += 10
-            elif atm_distance < 0.10:  # 10%以内
-                score += 5
-            
-            # 期权价格合理性 (避免过于便宜或昂贵的期权)
-            if 0.10 <= option.latest_price <= 5.0:
-                score += 15
-            elif 0.05 <= option.latest_price <= 10.0:
-                score += 10
-            
-            # 🔥 4. 实时Greeks评分 (新增20%)
-            greeks_score = self._calculate_real_greeks_score_for_option(option, underlying_price)
-            score += greeks_score * 0.20
-            print(f"📊 [{option.symbol}] 实时Greeks评分: {greeks_score:.1f}/100 (+{greeks_score * 0.20:.1f}分)")
-            
-            return min(score, 100.0)
-            
-        except Exception as e:
-            print(f"⚠️ 计算期权评分失败: {e}")
-            return 0.0
+
     
-    def _calculate_real_greeks_score_for_option(self, option, underlying_price: float) -> float:
-        """计算期权的实时Greeks评分 (0-100分)"""
-        try:
-            # 构造position字典来获取Greeks
-            position = {
-                'symbol': option.symbol,
-                'strike': option.strike,
-                'option_type': option.right,
-                'current_price': option.latest_price,
-                'underlying_symbol': 'QQQ',  # 假设是QQQ期权
-                'bid': option.bid,
-                'ask': option.ask,
-                'volume': option.volume,
-                'open_interest': option.open_interest
-            }
-            
-            # 获取实时Greeks
-            greeks = self._get_position_greeks(position)
-            
-            score = 0.0
-            
-            # Delta评分 (40分): ATM附近的Delta最优
-            delta = abs(greeks.get('delta', 0.5))
-            # 对于0DTE期权，Delta 0.4-0.6是最佳区间
-            if 0.4 <= delta <= 0.6:
-                delta_score = 40.0
-            elif 0.3 <= delta <= 0.7:
-                delta_score = 30.0
-            elif 0.2 <= delta <= 0.8:
-                delta_score = 20.0
-            else:
-                delta_score = 10.0
-            
-            score += delta_score
-            print(f"   Delta={delta:.3f} → {delta_score:.0f}分")
-            
-            # Gamma评分 (30分): 高Gamma提供更大的价格敏感性
-            gamma = greeks.get('gamma', 0.03)
-            if gamma > 0.05:
-                gamma_score = 30.0
-            elif gamma > 0.03:
-                gamma_score = 25.0
-            elif gamma > 0.01:
-                gamma_score = 15.0
-            else:
-                gamma_score = 5.0
-                
-            score += gamma_score
-            print(f"   Gamma={gamma:.3f} → {gamma_score:.0f}分")
-            
-            # Theta评分 (20分): 适度的时间衰减
-            theta = abs(greeks.get('theta', -0.05))
-            if theta < 0.03:  # 低时间衰减
-                theta_score = 20.0
-            elif theta < 0.08:  # 中等时间衰减
-                theta_score = 15.0
-            elif theta < 0.15:  # 较高时间衰减
-                theta_score = 10.0
-            else:  # 极高时间衰减
-                theta_score = 5.0
-                
-            score += theta_score
-            print(f"   Theta={-theta:.3f} → {theta_score:.0f}分")
-            
-            # Vega评分 (10分): 适度的波动率敏感性
-            vega = greeks.get('vega', 0.1)
-            if 0.05 <= vega <= 0.15:
-                vega_score = 10.0
-            elif 0.02 <= vega <= 0.25:
-                vega_score = 7.0
-            else:
-                vega_score = 3.0
-                
-            score += vega_score
-            print(f"   Vega={vega:.3f} → {vega_score:.0f}分")
-            
-            return min(score, 100.0)
-            
-        except Exception as e:
-            print(f"⚠️ 计算期权Greeks评分失败: {e}")
-            return 50.0  # 返回中性评分
+
     
     def _calculate_trade_parameters(self, signal: TradingSignal, option, underlying_price: float) -> Dict[str, Any]:
         """计算交易参数"""
@@ -4321,130 +4193,61 @@ class RealAPIRiskManagerDemo:
             str: LOW_VOL, NORMAL_VOL, HIGH_VOL, EXTREME_VOL
         """
         try:
-            # 方法1: 直接从Tiger API获取VIX
+            # 唯一方案: 从Tiger API获取真实VIX数据
             vix_price = self._get_real_vix_from_api()
             
-            if vix_price:
-                print(f"📊 实时VIX: {vix_price:.2f}")
-                
-                if vix_price < 15:
-                    return "LOW_VOL"
-                elif vix_price < 25:
-                    return "NORMAL_VOL"
-                elif vix_price < 35:
-                    return "HIGH_VOL"
-                else:
-                    return "EXTREME_VOL"
+            if not vix_price:
+                raise RuntimeError("无法从Tiger API获取VIX数据")
             
-            # 方法2: 基于QQQ期权隐含波动率估算VIX水平
-            print("⚠️ VIX API数据不可用，使用估算方法")
-            estimated_vix = self._estimate_vix_from_qqq_options()
+            print(f"📊 实时VIX: {vix_price:.2f}")
             
-            if estimated_vix < 15:
-                return "LOW_VOL"
-            elif estimated_vix < 25:
-                return "NORMAL_VOL"
-            elif estimated_vix < 35:
-                return "HIGH_VOL"
+            if vix_price < 15:
+                regime = "LOW_VOL"
+            elif vix_price < 25:
+                regime = "NORMAL_VOL"
+            elif vix_price < 35:
+                regime = "HIGH_VOL"
             else:
-                return "EXTREME_VOL"
+                regime = "EXTREME_VOL"
+            
+            print(f"📈 VIX体制: {regime}")
+            return regime
                 
         except Exception as e:
-            print(f"⚠️ VIX体制识别失败: {e}")
-            return "NORMAL_VOL"  # 默认正常波动率
+            error_msg = f"❌ VIX体制识别失败: {e}"
+            print(error_msg)
+            raise RuntimeError(error_msg) from e
     
     def _get_real_vix_from_api(self) -> Optional[float]:
-        """从Tiger API获取真实VIX数据"""
+        """从Tiger API获取真实VIX数据 - 唯一可信数据源"""
         try:
-            # 方法1: 使用已有的优化API接口
-            from src.utils.api_optimizer import optimize_tiger_api_calls
+            print("🔄 正在从Tiger API获取VIX数据...")
             
-            api_result = optimize_tiger_api_calls(
-                quote_client=self.quote_client,
-                symbols=[],  # 不需要其他标的
-                include_vix=True,
-                include_volume=False,
-                include_status=False,
-                ultra_fast_mode=True  # 使用超快模式
-            )
-            
-            vix_data = api_result.get('vix_data')
-            if vix_data:
-                vix_value = getattr(vix_data, 'latest_price', None) or getattr(vix_data, 'prev_close', None)
-                
-                if vix_value and vix_value > 0:
-                    print(f"✅ API获取VIX: {vix_value:.2f} (延迟: {api_result.get('execution_time_ms', 0):.1f}ms)")
-                    return float(vix_value)
-            
-            # 方法2: 直接调用Tiger API获取VIX
+            # 直接调用Tiger API获取VIX数据
             vix_briefs = self.quote_client.get_briefs(['VIX'])
-            if vix_briefs and len(vix_briefs) > 0:
-                vix_brief = vix_briefs[0]
-                vix_value = vix_brief.latest_price or vix_brief.prev_close
-                
-                if vix_value and vix_value > 0:
-                    print(f"✅ 直接获取VIX: {vix_value:.2f}")
-                    return float(vix_value)
             
-            print("⚠️ VIX API返回无效数据")
-            return None
+            if not vix_briefs or len(vix_briefs) == 0:
+                raise RuntimeError("Tiger API未返回VIX数据")
             
-        except ImportError:
-            print("⚠️ API优化器不可用，尝试直接获取VIX")
-            try:
-                vix_briefs = self.quote_client.get_briefs(['VIX'])
-                if vix_briefs and len(vix_briefs) > 0:
-                    vix_brief = vix_briefs[0]
-                    vix_value = vix_brief.latest_price or vix_brief.prev_close
-                    
-                    if vix_value and vix_value > 0:
-                        print(f"✅ 直接获取VIX: {vix_value:.2f}")
-                        return float(vix_value)
-                
-                print("⚠️ 直接VIX API也返回无效数据")
-                return None
-                
-            except Exception as e:
-                print(f"❌ 获取VIX数据失败: {e}")
-                return None
+            vix_brief = vix_briefs[0]
+            vix_value = vix_brief.latest_price or vix_brief.prev_close
+            
+            if not vix_value or vix_value <= 0:
+                raise ValueError(f"Tiger API返回无效VIX值: {vix_value}")
+            
+            # 验证VIX数据合理性 (通常在8-80之间)
+            if not (8.0 <= vix_value <= 80.0):
+                print(f"⚠️ VIX值异常: {vix_value} (通常在8-80之间)")
+            
+            print(f"✅ 成功获取VIX: {vix_value:.2f}")
+            return float(vix_value)
+            
         except Exception as e:
-            print(f"❌ VIX API调用失败: {e}")
-            return None
+            error_msg = f"Tiger API获取VIX失败: {e}"
+            print(f"❌ {error_msg}")
+            raise RuntimeError(error_msg) from e
     
-    def _estimate_vix_from_qqq_options(self) -> float:
-        """通过QQQ期权估算VIX水平
-        
-        使用QQQ ATM期权的隐含波动率来估算市场波动率环境
-        """
-        try:
-            # 简化实现：基于历史经验的VIX估算
-            # QQQ和SPY的隐含波动率通常比VIX低20-30%
-            
-            # 方法1: 基于最近价格波动估算
-            # 从信号生成器获取价格数据
-            price_data = None
-            if hasattr(self, 'push_signal_generator') and self.push_signal_generator:
-                price_data = getattr(self.push_signal_generator, 'price_data', None)
-            
-            if price_data and len(price_data) >= 20:
-                prices = list(price_data)[-20:]  # 最近20个数据点
-                returns = [(prices[i] - prices[i-1]) / prices[i-1] for i in range(1, len(prices))]
-                import numpy as np
-                realized_vol = np.std(returns) * np.sqrt(252 * 6.5 * 60)  # 年化波动率
-                estimated_vix = realized_vol * 100 * 1.3  # 转换为VIX水平 (IV通常高于RV)
-            else:
-                # 方法2: 默认估算 (基于当前市场常态)
-                estimated_vix = 18.0  # 市场正常状态的估算值
-            
-            # 限制在合理范围内
-            estimated_vix = max(10, min(60, estimated_vix))
-            
-            print(f"📊 估算VIX水平: {estimated_vix:.1f}")
-            return estimated_vix
-            
-        except Exception as e:
-            print(f"⚠️ VIX估算失败: {e}")
-            return 18.0
+
     
     def _apply_vix_regime_adjustment(self, signal) -> float:
         """应用VIX体制调整到信号强度
