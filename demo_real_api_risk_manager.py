@@ -1006,15 +1006,15 @@ class RealTimeSignalGenerator:
             reasons.append("期权非交易时间，禁止信号生成")
             return "HOLD", 0.0, 0.0, reasons
         
-        # ✅ 期权交易时间内 - 基于VIX体制动态调整阈值
-        vix_regime = self._get_vix_regime()
-        base_strong, base_standard, base_weak, base_exit = self._get_vix_adjusted_thresholds(vix_regime)
+        # ✅ 期权交易时间内 - 使用标准阈值（VIX调整在主类中处理）
+        # 注意：VIX体制调整应该在调用此方法前在主类中处理
+        base_strong, base_standard, base_weak, base_exit = (65, 50, 35, 50)  # 标准阈值
         
         strong_threshold = base_strong  
         standard_threshold = base_standard
         weak_threshold = base_weak
         exit_threshold = base_exit
-        reasons.append(f"期权交易时间-{vix_regime}阈值")
+        reasons.append("期权交易时间-标准阈值")
         
         # 🚪 出场信号优先（风控）
         if exit_score >= exit_threshold:
@@ -1089,28 +1089,18 @@ class RealTimeSignalGenerator:
         0DTE期权对波动率环境极其敏感
         """
         try:
-            # 获取VIX体制识别
-            vix_regime = self._get_vix_regime()
+            # 简化版本：使用固定IV评分 (VIX体制在主类中处理)
+            # 注意：在信号生成器中使用简化评分，完整VIX分析在主类中进行
             
-            # 基于VIX体制的IV评分
-            if vix_regime == "LOW_VOL":  # 低波动率环境 (VIX < 15)
-                base_iv_score = 25.0  # 🎯 低IV环境最适合0DTE交易
-                print(f"📈 [{self.symbol}] IV环境: 低波动率 (+{base_iv_score:.0f}分) - 0DTE最优环境")
-            elif vix_regime == "NORMAL_VOL":  # 正常波动率环境 (15 <= VIX < 25)
-                base_iv_score = 20.0  # 正常环境，适度风险
-                print(f"📊 [{self.symbol}] IV环境: 正常波动率 (+{base_iv_score:.0f}分) - 标准交易环境")
-            elif vix_regime == "HIGH_VOL":  # 高波动率环境 (25 <= VIX < 35)
-                base_iv_score = 10.0  # 高风险环境，谨慎交易
-                print(f"⚠️ [{self.symbol}] IV环境: 高波动率 (+{base_iv_score:.0f}分) - 谨慎交易")
-            else:  # EXTREME_VOL: 极端波动率环境 (VIX >= 35)
-                base_iv_score = 0.0   # 🛑 极端环境，避免交易
-                print(f"🛑 [{self.symbol}] IV环境: 极端波动率 (+{base_iv_score:.0f}分) - 建议避免")
+            # 基础IV评分 (基于正常市场环境)
+            base_iv_score = 20.0  # 标准环境评分
+            print(f"📊 [{self.symbol}] IV环境: 标准评分 (+{base_iv_score:.0f}分) - 等待主类VIX调整")
             
-            # IV趋势加分/减分 (±5分)
-            iv_trend_score = self._calculate_iv_trend_score()
+            # 简化的趋势评分
+            iv_trend_score = 2.0  # 中性偏正面
             
-            # 期权市场结构评分 (±5分)
-            market_structure_score = self._calculate_option_market_structure_score()
+            # 简化的市场结构评分
+            market_structure_score = 1.0  # 轻微正面
             
             total_iv_score = base_iv_score + iv_trend_score + market_structure_score
             total_iv_score = max(0, min(30, total_iv_score))  # 限制在0-30分范围
@@ -1123,115 +1113,6 @@ class RealTimeSignalGenerator:
         except Exception as e:
             print(f"⚠️ [{self.symbol}] IV评分计算失败: {e}")
             return 15.0  # 返回中性评分
-    
-    def _get_vix_regime(self) -> str:
-        """获取当前VIX波动率体制
-        
-        Returns:
-            str: LOW_VOL, NORMAL_VOL, HIGH_VOL, EXTREME_VOL
-        """
-        try:
-            # 方法1: 通过Tiger API获取VIX (如果支持)
-            # vix_price = self._get_vix_from_api()
-            
-            # 方法2: 基于QQQ期权隐含波动率估算VIX水平
-            estimated_vix = self._estimate_vix_from_qqq_options()
-            
-            if estimated_vix < 15:
-                return "LOW_VOL"
-            elif estimated_vix < 25:
-                return "NORMAL_VOL"
-            elif estimated_vix < 35:
-                return "HIGH_VOL"
-            else:
-                return "EXTREME_VOL"
-                
-        except Exception as e:
-            print(f"⚠️ VIX体制识别失败: {e}")
-            return "NORMAL_VOL"  # 默认正常波动率
-    
-    def _estimate_vix_from_qqq_options(self) -> float:
-        """通过QQQ期权估算VIX水平
-        
-        使用QQQ ATM期权的隐含波动率来估算市场波动率环境
-        """
-        try:
-            # 简化实现：基于历史经验的VIX估算
-            # QQQ和SPY的隐含波动率通常比VIX低20-30%
-            
-            # 方法1: 基于最近价格波动估算
-            # 注意：price_history可能属于父类或信号生成器
-            price_data = getattr(self, 'price_history', None) or getattr(self, 'price_data', None)
-            if price_data and len(price_data) >= 20:
-                prices = list(price_data)[-20:]  # 最近20个数据点
-                returns = [(prices[i] - prices[i-1]) / prices[i-1] for i in range(1, len(prices))]
-                import numpy as np
-                realized_vol = np.std(returns) * np.sqrt(252 * 6.5 * 60)  # 年化波动率
-                estimated_vix = realized_vol * 100 * 1.3  # 转换为VIX水平 (IV通常高于RV)
-            else:
-                # 方法2: 默认估算 (基于当前市场常态)
-                estimated_vix = 18.0  # 市场正常状态的估算值
-            
-            # 限制在合理范围内
-            estimated_vix = max(10, min(60, estimated_vix))
-            
-            print(f"📊 估算VIX水平: {estimated_vix:.1f}")
-            return estimated_vix
-            
-        except Exception as e:
-            print(f"⚠️ VIX估算失败: {e}")
-            return 18.0
-    
-    def _calculate_iv_trend_score(self) -> float:
-        """计算IV趋势评分 (±5分)"""
-        try:
-            # 简化实现：基于波动率趋势
-            # 在实际实现中，这里应该分析IV的变化趋势
-            
-            # 模拟IV趋势分析
-            # 下降的IV对0DTE交易有利 (更便宜的期权)
-            return 2.0  # 中性偏正面的趋势评分
-            
-        except Exception as e:
-            print(f"⚠️ IV趋势评分失败: {e}")
-            return 0.0
-    
-    def _calculate_option_market_structure_score(self) -> float:
-        """计算期权市场结构评分 (±5分)"""
-        try:
-            # 简化实现：基于期权市场特征
-            # - Put/Call比率
-            # - 期权成交量
-            # - 买卖价差质量
-            
-            # 模拟市场结构评分
-            return 1.0  # 轻微正面的市场结构
-            
-        except Exception as e:
-            print(f"⚠️ 市场结构评分失败: {e}")
-            return 0.0
-    
-    def _get_vix_adjusted_thresholds(self, vix_regime: str) -> tuple:
-        """根据VIX体制调整信号阈值
-        
-        Args:
-            vix_regime: VIX波动率体制
-            
-        Returns:
-            tuple: (strong_threshold, standard_threshold, weak_threshold, exit_threshold)
-        """
-        if vix_regime == "LOW_VOL":
-            # 低波动环境：提高阈值，更严格的信号筛选
-            return (75, 60, 45, 55)  # 保守策略
-        elif vix_regime == "NORMAL_VOL":
-            # 正常波动环境：标准阈值
-            return (65, 50, 35, 50)  # 标准策略
-        elif vix_regime == "HIGH_VOL":
-            # 高波动环境：降低阈值，捕获更多机会
-            return (55, 40, 25, 45)  # 积极策略
-        else:  # EXTREME_VOL
-            # 极端波动环境：显著降低阈值，但加强风控
-            return (45, 30, 15, 40)  # 机会主义策略
     
     def _calculate_time_decay_urgency(self) -> float:
         """计算0DTE期权时间衰减紧迫性加分"""
@@ -1521,8 +1402,10 @@ class RealAPIRiskManagerDemo:
                             print(f"\\n⏰ === 定期平仓检查 === (持仓数:{len(self.active_positions)})")
                             self._check_auto_close_conditions()
                     
-                    # 🚀 自动交易：信号强度>70时触发交易（固定1手）
-                    if signal.strength > 70 and signal.signal_type in ['BUY', 'SELL']:
+                    # 🚀 自动交易：应用VIX体制调整后判断触发条件
+                    vix_adjusted_strength = self._apply_vix_regime_adjustment(signal)
+                    if vix_adjusted_strength > 70 and signal.signal_type in ['BUY', 'SELL']:
+                        print(f"📊 VIX调整: {signal.strength:.1f} → {vix_adjusted_strength:.1f}")
                         self._execute_auto_trade(signal)
         except Exception as e:
             print(f"❌ 处理行情推送失败: {e}")
@@ -4237,6 +4120,108 @@ class RealAPIRiskManagerDemo:
             print(f"❌ 演示过程中出现错误: {e}")
             import traceback
             traceback.print_exc()
+    
+    # ==================== VIX体制识别和调整方法 ====================
+    
+    def _get_vix_regime(self) -> str:
+        """获取当前VIX波动率体制
+        
+        Returns:
+            str: LOW_VOL, NORMAL_VOL, HIGH_VOL, EXTREME_VOL
+        """
+        try:
+            # 方法1: 通过Tiger API获取VIX (如果支持)
+            # vix_price = self._get_vix_from_api()
+            
+            # 方法2: 基于QQQ期权隐含波动率估算VIX水平
+            estimated_vix = self._estimate_vix_from_qqq_options()
+            
+            if estimated_vix < 15:
+                return "LOW_VOL"
+            elif estimated_vix < 25:
+                return "NORMAL_VOL"
+            elif estimated_vix < 35:
+                return "HIGH_VOL"
+            else:
+                return "EXTREME_VOL"
+                
+        except Exception as e:
+            print(f"⚠️ VIX体制识别失败: {e}")
+            return "NORMAL_VOL"  # 默认正常波动率
+    
+    def _estimate_vix_from_qqq_options(self) -> float:
+        """通过QQQ期权估算VIX水平
+        
+        使用QQQ ATM期权的隐含波动率来估算市场波动率环境
+        """
+        try:
+            # 简化实现：基于历史经验的VIX估算
+            # QQQ和SPY的隐含波动率通常比VIX低20-30%
+            
+            # 方法1: 基于最近价格波动估算
+            # 从信号生成器获取价格数据
+            price_data = None
+            if hasattr(self, 'push_signal_generator') and self.push_signal_generator:
+                price_data = getattr(self.push_signal_generator, 'price_data', None)
+            
+            if price_data and len(price_data) >= 20:
+                prices = list(price_data)[-20:]  # 最近20个数据点
+                returns = [(prices[i] - prices[i-1]) / prices[i-1] for i in range(1, len(prices))]
+                import numpy as np
+                realized_vol = np.std(returns) * np.sqrt(252 * 6.5 * 60)  # 年化波动率
+                estimated_vix = realized_vol * 100 * 1.3  # 转换为VIX水平 (IV通常高于RV)
+            else:
+                # 方法2: 默认估算 (基于当前市场常态)
+                estimated_vix = 18.0  # 市场正常状态的估算值
+            
+            # 限制在合理范围内
+            estimated_vix = max(10, min(60, estimated_vix))
+            
+            print(f"📊 估算VIX水平: {estimated_vix:.1f}")
+            return estimated_vix
+            
+        except Exception as e:
+            print(f"⚠️ VIX估算失败: {e}")
+            return 18.0
+    
+    def _apply_vix_regime_adjustment(self, signal) -> float:
+        """应用VIX体制调整到信号强度
+        
+        Args:
+            signal: 原始交易信号
+            
+        Returns:
+            float: VIX调整后的信号强度
+        """
+        try:
+            vix_regime = self._get_vix_regime()
+            original_strength = signal.strength
+            
+            # 根据VIX体制调整信号强度
+            if vix_regime == "LOW_VOL":
+                # 低波动环境：提高信号强度要求(更严格)
+                adjustment = -10.0  # 减少10分，更难达到70分阈值
+            elif vix_regime == "NORMAL_VOL":
+                # 正常波动环境：不调整
+                adjustment = 0.0
+            elif vix_regime == "HIGH_VOL":
+                # 高波动环境：降低信号强度要求(更宽松)
+                adjustment = +5.0  # 增加5分，更容易达到70分阈值
+            else:  # EXTREME_VOL
+                # 极端波动环境：显著降低要求但加强风控
+                adjustment = +10.0  # 增加10分，更容易触发交易
+            
+            adjusted_strength = original_strength + adjustment
+            adjusted_strength = max(0.0, min(100.0, adjusted_strength))  # 限制在0-100范围
+            
+            if adjustment != 0:
+                print(f"🌊 VIX体制 {vix_regime}: 信号强度 {original_strength:.1f} → {adjusted_strength:.1f} (调整{adjustment:+.1f})")
+            
+            return adjusted_strength
+            
+        except Exception as e:
+            print(f"⚠️ VIX体制调整失败: {e}")
+            return signal.strength  # 返回原始强度
 
 
 def stability_test_30min():
